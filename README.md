@@ -14,15 +14,9 @@ Install miniconda, keras and tensorflow python dependencies:
 - `reticulate::install_miniconda()`
 - `keras::install_keras()`
 
-Check:
-
-- `is_keras_available()`
-- `tf_config()`
-
-
 For installing dependencies of rgdal, stars and magick on linux:
 
-- gdal:`sudo apt-get install gdal-bin proj-bin libgdal-dev libproj-dev`
+- gdal:`sudo apt-get install gdal-bin libgdal-dev`
 
 - stars: `sudo apt-get install libudunits2-dev`
 
