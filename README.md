@@ -24,6 +24,6 @@ For installing dependencies of rgdal, stars and magick on linux:
 
 - gdal:`sudo apt-get install gdal-bin proj-bin libgdal-dev libproj-dev`
 
-- stars: `sudo apt-get install libunits2-dev`
+- stars: `sudo apt-get install libudunits2-dev`
 
 - magick: `sudo apt-get install libmagick++-dev`
