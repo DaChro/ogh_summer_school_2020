@@ -28,7 +28,7 @@ https://docs.docker.com/docker-for-windows/install/
 
 # Docker
 
-If you are in for using Docker, I´ve prepared a Docker image that includes all software and data for the tutorial. To use it, download and install Docker:
+If you are in for using Docker, I´ve prepared a Docker image that includes all software and data for the tutorial, so you can reproduce the tutorial without installing keras etc. on your host system. To use it, download and install Docker:
 
 - Linux: https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
 - Windows: https://docs.docker.com/docker-for-windows/install/
