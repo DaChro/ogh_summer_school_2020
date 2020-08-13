@@ -31,7 +31,7 @@ For installing dependencies of rgdal, stars and magick on linux:
 
 # Docker
 
-If you are in for using Docker, I´ve prepared a Docker image that includes all software and data for the tutorial, so you can reproduce the tutorial without installing keras etc. on your host system. To use it, download and install Docker:
+If you are in for using Docker, I´ve prepared a Docker image that includes all software and data for the tutorial, so you can reproduce the tutorial without installing keras etc. on your host system. If you want to use it, download and install Docker Engine:
 
 - Linux: https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
 - Windows: https://docs.docker.com/docker-for-windows/install/
@@ -39,7 +39,8 @@ If you are in for using Docker, I´ve prepared a Docker image that includes all 
 
 Then:
 
-- in your terminal (or power shell) type: docker run -d -p 8788:8787 dachro/oghss:latest
+- start Docker Engine
+- in your terminal (or power shell) type: `docker run -d -p 8788:8787 dachro/oghss:latest`
     - `8788` on the left side of the `:` is the port on your host system. You can use any other available port that your prefer
 - after the container has been built and started, open you browers and go to `localhost:8788/` (or whatever port you have chosen)
 - you should see the rstudio server login page. Log in via username: rstudio and password: rstudio
@@ -47,5 +48,5 @@ Then:
 # Data
 
 Download and unzip the turoial data from:
-https://docs.docker.com/docker-for-windows/install/
+https://uni-muenster.sciebo.de/s/SOjP7fRGBRztn9z/download
 
