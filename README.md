@@ -22,6 +22,9 @@ For installing dependencies of rgdal, stars and magick on linux:
 
 - magick: `sudo apt-get install libmagick++-dev`
 
+Download and unzip the turoial data from:
+https://docs.docker.com/docker-for-windows/install/
+
 
 # Docker
 
@@ -34,6 +37,6 @@ If you are in for using Docker, I´ve prepared a Docker image that includes all 
 Then:
 
 - in your terminal (or power shell) type: docker run -d -p 8788:8787 dachro/oghss:latest
-    - `8788` on the left side of the ":" is the port on your host system. You can use any other available port that your prefer
+    - `8788` on the left side of the `:` is the port on your host system. You can use any other available port that your prefer
 - after the container has been built and started, open you browers and go to `localhost:8788/` (or whatever port you have chosen)
 - you should see the rstudio server login page. Log in via username: rstudio and password: rstudio
