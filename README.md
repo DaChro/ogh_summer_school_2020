@@ -48,6 +48,7 @@ Then:
     - `8788` on the left side of the `:` is the port on your host system. You can use any other available port that your prefer
 - after the container has been built and started, open you browser and go to `localhost:8788/` (or whatever port you have chosen)
 - you should see the rstudio server login page. Log in via username: rstudio and password: rstudio
+- you are good to go, you don´t need to follow the installations instructions above
 
 # Data
 
