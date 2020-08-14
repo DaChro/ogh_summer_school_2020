@@ -29,6 +29,10 @@ For installing dependencies of rgdal, stars and magick on linux:
 
 - magick: `sudo apt-get install libmagick++-dev`
 
+
+When running any tensorflow-related code for the first time, you will probably get a bunch of messages/warnings (some mean-looking red text). Don´t worry about this. This is mainly tensorflow stating that it is not running as fast as it could (this is because we are not using GPU support and have no specific CPU extensions in order to be compatible with as many systems as possible).
+
+
 # Docker
 
 If you are in for using Docker, I´ve prepared a Docker image that includes all software and data for the tutorial, so you can reproduce the tutorial without installing keras etc. on your host system. If you want to use it, download and install Docker Engine:
@@ -42,11 +46,11 @@ Then:
 - start Docker Engine
 - in your terminal (or power shell) type: `docker run -d -p 8788:8787 dachro/oghss:latest`
     - `8788` on the left side of the `:` is the port on your host system. You can use any other available port that your prefer
-- after the container has been built and started, open you brower and go to `localhost:8788/` (or whatever port you have chosen)
+- after the container has been built and started, open you browser and go to `localhost:8788/` (or whatever port you have chosen)
 - you should see the rstudio server login page. Log in via username: rstudio and password: rstudio
 
 # Data
 
-Download and unzip the turoial data from:
+Download and unzip the tutorial data from:
 https://uni-muenster.sciebo.de/s/SOjP7fRGBRztn9z/download
 
