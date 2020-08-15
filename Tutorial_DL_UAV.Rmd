@@ -1467,12 +1467,12 @@ rebuild_img <- function(pred_subsets,out_path,target_rst){
 
 1. Using the code chunks shown in this tutorial, try to apply the pretrained U-net to predict on another testarea, which you can find in folder `/testarea_exercise`:
 
-a) Inspect the image: What do you think will happen when using our model here.
-b) Turn the image into subsets (use the function dl_subsets, save the cropped raster it returns to a variable for later)
-c) Prepare the subsets such that they can be processed by the model (you can use the function dl_prepare_data)
-d) Make the prediction using `pretrained_unet`.
-e) Reassemble the predictions back to one image/map
-f) Visualize the result and inspect the prediction: Does the outcome match your assumption made in a) ?
+    a) Inspect the image: What do you think will happen when using our model here.
+    b) Turn the image into subsets (use the function dl_subsets, save the cropped raster it returns to a variable for later)
+    c) Prepare the subsets such that they can be processed by the model (you can use the function dl_prepare_data)
+    d) Make the prediction using `pretrained_unet`.
+    e) Reassemble the predictions back to one image/map
+    f) Visualize the result and inspect the prediction: Does the outcome match your assumption made in a) ?
 
 2. Use the dataset, that you prepared for exercise 1. Make a prediction again, but this time using the model `pretrained_unet2`, which is in the `tutorial_data` folder. Compare the results.
 
