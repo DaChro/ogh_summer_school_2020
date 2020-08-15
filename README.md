@@ -2,6 +2,8 @@
 
 *OpenGeoHub summer school 2020*
 
+Tutorial Document:
+https://dachro.github.io/ogh_summer_school_2020/Tutorial_DL_UAV.html
 
 # Installation
 
