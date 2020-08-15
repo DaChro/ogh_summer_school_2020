@@ -1273,7 +1273,7 @@ viewRGB(input_img,layer.name = "input image", quantiles = c(0,1),r=1,g=2,b=3)+ma
 
 A very important topic, of which we can only briefly scratch the surface, is how to analyze and understand your model, what it has learned, how it transforms the input images, and why it classifies images the way it does. This might be even more important when making use of pre-trained models.
 
-Here, we will only look at one example of how to get a better understanding of what is actually happening to the images in your model. If you want to continue working with Deep Learning, I recommend to look deeper into this field as well, e.g. by reading the chapter 5.4 of [@Chollet]
+Here, we will only look at one example of how to get a better understanding of what is actually happening to the images in your model. If you want to continue working with Deep Learning, I recommend to look deeper into this field as well, e.g. by reading the chapter 5.4 of [@Chollet2018]
 
 So far, we have looked at the predictions made by our models. However, we can also look into the outputs of intermediate layers. By visualizing the activations of single layers of our trained model, we get an idea of what the model has learned during training. We can do this by using the functional API in keras.
 
