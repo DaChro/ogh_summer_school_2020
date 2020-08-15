@@ -1264,7 +1264,7 @@ result_map[result_map[[1]]<0.5] <- NA
 ``` 
 
 ```{r,echo=F,warning=F, message=F,results=T,out.width="100%"}
-viewRGB(input_img,layer.name = "input image", quantiles = c(0,1),r=1,g=2,b=3)+mapview(result_map,layer.name="wildrye prediciton", alpha.regions=0.4,na.alpha=0)
+viewRGB(input_img,layer.name = "input image", quantiles = c(0,1),r=1,g=2,b=3)+mapview(result_map,layer.name="wildrye prediction", alpha.regions=0.4,na.alpha=0)
 ```
 
 
@@ -1476,8 +1476,6 @@ f) Visualize the result and inspect the prediction: Does the outcome match your 
 
 2. Use the dataset, that you prepared for exercise 1. Make a prediction again, but this time using the model `pretrained_unet2`, which is in the `tutorial_data` folder. Compare the results.
 
-3. Bonus Question: The figure below shows the sketch of the original U-net, as proposed by [@Ronneberger2015]. Compare it to the model we used in the tutorial. Besides the fact that we are using pretrained layers for the contracting path, what is the other major difference in the architecture? 
-
 
 
 # Side Notes
@@ -1551,7 +1549,7 @@ set_weights(backup_model,weights = get_weights(original_model) )
 As we have seen above, a convolutional filter slides a window over the input image to produce the output as a weighted sum of the pixels within that window. Given a certain size of this sliding window (`kernel_size`), not all pixels in the input image are also valid locations for the output: for pixels at the edges of images, no convolution can be applied because there are no neighboring pixels on all sides. Thus, the output resulting from a convolution will be a bit smaller than the input (containing only the pixels on which the sliding window can be centered). If we want to keep the same size in the output as in the input, we can set the argument `padding` to `same` (default is `valid`). This means that during the convolution an appropriate number of pixels (with value 0) is added on each side such that the sliding window can also be centered on the edge pixels and the size of the output is the same as of the input. 
 
 
-## Actication functions {#activation_functions}
+## Activation functions {#activation_functions}
 
 
 ### Step activation function
