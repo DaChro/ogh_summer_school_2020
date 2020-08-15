@@ -1,0 +1,1717 @@
+---
+title: "Introduction to Deep Learning in R for the Analysis of UAV-based Remote Sensing Data"
+author: "OpenGeoHub summer school 2020"
+date: "*Aug 17, 2020*"
+output: 
+  html_document:
+    highlight: tango
+    code_folding: show
+    theme: flatly
+    toc: yes
+    toc_depth: 2
+    toc_float: 
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+bibliography: references.bib
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+### Setting up your environment
+
+```{r env, results=F,warning=F,message=F}
+library(keras)
+library(tensorflow)
+library(tfdatasets)
+library(purrr)
+library(ggplot2)
+library(rsample)
+library(stars)
+library(raster)
+library(reticulate)
+library(mapview)
+
+
+#If not done already, download and unzip the tutorial data:
+
+#download.file("https://uni-muenster.sciebo.de/s/45044pj8yvQsdOJ/download",destfile = "tutorial_data.zip")
+#unzip("./tutorial_data.zip")
+#setwd("./tutorial_data/")
+
+
+```
+
+
+
+
+# Introduction
+
+In this tutorial we aim to get a basic understanding of the key practical steps for applying deep learning for object detection in remote sensing images, and how to do them in R.
+
+These steps are: 
+
+- Building your model
+- Preparing your data
+- Training your model
+- Predicting with your model
+
+In part I, we consider a very basic workflow. We´re going build a rather puristic model for image classification and train it from scratch on a small amount of training data. Our model will be able to predict whether or not a target is present in an image.
+
+In part II we  move on to aspects that are important in spatial applications of CNNs like the one in our scenario: we´ll develop a model for  pixel-by-pixel classification applying an architecture called U-net [@Ronneberger2015]. As a result, our model will be able to predict where in an image the target is present. In addition, we´ll address the practical question of how to get from our remote sensing images to a bunch of very small subsets that can be processed by CNNs, and how to reassemble the resulting predictions back to a map of our test area.
+
+We will also look at two strategies/tools for tackling small data problems, which specifically useful when working with UAV data (or other data that is rather specific to a certain use case). These are transfer learning (using pretrained networks) and data augmentation (increasing the amount of training data).
+
+Finally we´ll briefly touch on the apsect of inspecting a trained model more closely by visualizing the spatial patterns it has learned.
+
+Many parts of what is explained here are based on the book _Deep Learning with R_ by Francois Chollet [@Chollet2018], which is a great resource for getting a (thorough) introduction into the field along with practical advice (R-code examples). 
+
+
+# Scenario
+
+Our task in this tutorial is to develop a CNN for mapping the extent of wildrye (_Elymus athericus_) growth on the Hallig (seasonally flooded island) "Nordstrandischmoor" in Northern Germany.
+_Elymus athericus_ is a grass species common to salt marshes in central Europe. When becoming dominant, it can negatively impact the biodiversity of an ecosystem. Therefore, it requires monitoring and management. 
+
+This scenario presents a typical ecological monitoring task. Applications like this have been one of the reasons why UAV-based remote sensing has experienced great interest within the research community of landscape ecology.
+
+In this tutorial we will work on a very simple and very small example.
+This is what our data looks like. The test area, in which we will detect the extent of wildrye to test our model, is located in western part of the Hallig The training data was collected in two small training areas in the north of the Hallig (not the whole of the images are used for training, only a few subsets).
+
+```{r test_area,echo=F,warning=F,message=F,eval=T}
+input_img <- stack("./testarea_part1/testarea.tif")
+training1 <- stack("./training_part1/quecken_img_1.tif")
+training2 <- stack("./training_part1/quecken_img_3.tif")
+viewRGB(input_img,quantiles = c(0,1),r=1,g=2,b=3,layer.name = "test area", map.types = c("OpenStreetMap","Esri.WorldImagery"))+viewRGB(training1,quantiles = c(0,1),r=1,g=2,b=3)+viewRGB(training2,quantiles = c(0,1),r=1,g=2,b=3)
+```
+
+
+# Part I: Basic Workflow
+
+## Building your model {#build_model}
+
+As we have seen in the plenary, our models consist of a number of layers consecutively transforming the input data into a number of (hopefully useful) representations of that data. At the end of this chain, there is a layer that outputs the prediction result. 
+ 
+```{r,echo=F}
+magick::image_draw(magick::image_read("./figures/CNN-sketch.png"))
+```
+ 
+In this part of the tutorial, the model we´re going to build will do image classification. 
+It will take an image as input and transform it to one number between 0 and 1, indicating the probability of a target being present in that image.
+
+The `keras` package offers two methods for building networks: the sequential model created by `keras_model_sequential()` and the Keras functional API where models are built using the `keras_model()` function. 
+
+As the name suggests `keras_model_sequential()` creates _sequential_ models with only one input, one output, and a directed linear stack of layers. The functional API allows to create more complex architectures of models. These models can allow for multiple inputs and outputs or having a non-linear topology. We will look at the functional API later, when we need it for building a U-net.
+For now, we only need `keras_model_sequential()`. Building networks using this method is pretty straighforward: We initiate an empty network and then consecutively add the layers we need. When adding the first layer, we need to specify the shape of the input that our network expects.
+
+```{r sequential_model}
+#initiate an empty model
+first_model <- keras_model_sequential()
+#add first layer, the expected input is of shape 128 by 128 on three channels (we will be dealing with RGB images)
+layer_conv_2d(first_model,filters = 32,kernel_size = 3, activation = "relu",input_shape = c(128,128,3))
+
+```
+
+
+Let´s have a look at our model.
+```{r}
+summary(first_model)
+```
+
+We now have a model with one layer (plus the input layer), in this case a convolutional layer. We can add further layers just the same way by using corresponding `keras` functions. Some examples are:
+
+- `layer_conv_2d()`: adds a convolutional layer 
+- `layer_dense()`: adds a dense layer, i.e. fully connected layer
+- `layer_max_pooling_2d()`: adds a maxpooling layer
+- `layer_flatten()`: adds a flattening layer
+- ...
+
+Before we look at the layers more closely, let´s finish our model by adding some more of those layers.
+
+```{r simple model}
+layer_max_pooling_2d(first_model, pool_size = c(2, 2)) 
+layer_conv_2d(first_model, filters = 64, kernel_size = c(3, 3), activation = "relu") 
+layer_max_pooling_2d(first_model, pool_size = c(2, 2)) 
+layer_conv_2d(first_model, filters = 128, kernel_size = c(3, 3), activation = "relu") 
+layer_max_pooling_2d(first_model, pool_size = c(2, 2)) 
+layer_conv_2d(first_model, filters = 128, kernel_size = c(3, 3), activation = "relu")
+layer_max_pooling_2d(first_model, pool_size = c(2, 2)) 
+layer_flatten(first_model) 
+layer_dense(first_model, units = 256, activation = "relu")
+layer_dense(first_model, units = 1, activation = "sigmoid")
+```
+
+As you might have noticed, we do not need to reassign the output of functions like `layer_dense()` back to the variable `first_model` or use pipe operators. This is because keras modifies models in-place (for further info, see side note on [model instances](#modelinstances))
+
+The final model now looks like this:
+```{r}
+summary(first_model)
+```
+
+
+We have now built our first small CNN. Before we continue with [preparing the data](#dataprep) and feeding our network, let´s have a quick look at the layers we have added.
+
+
+
+#### Dense Layers
+
+A dense layer basically computes a weighted sum of the feature values of each input and adds a certain value (bias). The result of this computation is then processed by an activation function (see below) to produce the final output of the layer. This is done once for each `unit` in the layer. In case of an image, the feature values are the pixel values. If we feed an image into a dense layer with 64 units, the result would consist of 64 numbers (resulting from 64 weighted sums of all pixel values of that image + 64 biases). In other words, the dense layer would transform the input image into 64 different representations, which could in turn be fed into the next layer of the network. Stacking multiple dense layers together enables the network to produce increasingly complex representations of the input data, and thereby tackle increasingly complex classification tasks. 
+
+The final dense layer in our network has only one unit. It produces only one output indicating whether the input image contains the target (in that case the output is 1) or not (in that case the output is 0). How does it get to a number between 0 and 1? This is because of the activation function used here, we´ll see that in a moment.
+
+We could in principle build a network of only dense layers to analyze images. However, these layers only consider patterns in the whole image at once. They look for "global patterns" in the sequence of pixels, and the location of pixels within the sequence is important. They are not able to detect local patterns in different parts of an image. This is what convolutional layers are for.
+
+
+#### Convolutional Layers
+
+
+In contrast to dense layers, convolutional layers are able to detect local patterns within images independent of where in that image the patterns are present.
+What convolutional layers do is essentially not much different from what you probably already know and might have used earlier for feature extraction in remote sensing images. For instance, edge detection (e.g. Sobel filter) is done using convolutional kernels sliding over your input image to extract (enhance) certain features (e.g. edges) in those images and suppress others. During the convolution, the filter slides a window of certain size (e.g. 3x3 pixels) over the input image centering it around each input pixel. It then computes a weighted sum of all pixels within that window, and the result of that sum is the new pixel value at this location in the output. The weights of this weighted sum determine the convolution. The figure below shows the principle of a convolution on a 1-band input. The same also works for 3-band images as in our case. The filter (kernel) is then 3-dimensional (e.g. 3x3x3 pixels) and the weighted sum is calculated over all pixel within the "sliding box".
+
+```{r,echo=F,out.width="60%",fig.align="center"}
+magick::image_draw(magick::image_read("./figures/conv_sketch.png"))
+```
+
+One of the specifics of convolutional neural networks is that the weights of the filters are not predefined by the analyst (by choosing a specific filter), but instead learned by the network during training. You only specify the properties of the filters such as the kernel size, 'sliding speed', or the behavior at image borders. With each convolutional layer you add multiple filters (equivalent to the `units` of dense layers). The first convolutional layer of our example has 64 filters. Such a layer transforms the image from 3 dimensions (the RGB bands) to 64 dimensions, so the output called _feature map_ has 64 different bands. Each band represents a response that was extracted from the image with one of the filters. The more convolutional layers are stacked up, the more complex and abstract the extracted features become.
+
+Similar to the dense layer, the output of the convolution is fed into an activation function to produce the final output of the layer. The figure below shows the result of two of the filters of a trained model on an input image (we are going to see how to produce such plots later). 
+
+In case you wonder what happens to pixels on the edges of input images, please see [this side note on padding](#padding)
+
+```{r echo=F, fig.align="center",out.width="100%", fig.asp=0.3}
+
+#adapted from: Chollet (2018): Deep learning with R (see references)
+
+plot_layer_activations <- function(img_path, model, activations_layers,channels, out_path=NULL){
+  
+  if(is.null(out_path)){
+    out_path <- getwd()
+  }
+  model_input_size <- c(model$input_shape[[2]], model$input_shape[[3]]) 
+  
+  img <- image_load(img_path, target_size =  model_input_size) %>%
+    image_to_array() %>%
+    array_reshape(dim = c(1, model_input_size[1], model_input_size[2], 3)) %>%
+    imagenet_preprocess_input()
+  
+  layer_outputs <- lapply(model$layers[activations_layers], function(layer) layer$output)
+  activation_model <- keras_model(inputs = model$input, outputs = layer_outputs)
+  activations <- predict(activation_model,img)
+  if(!is.list(activations)){
+    activations <- list(activations)
+  }
+  
+  
+  plot_channel <- function(channel,layer_name,channel_name) {
+    rotate <- function(x) t(apply(x, 2, rev))
+    image(rotate(channel), axes = FALSE, asp = 1,
+          col = terrain.colors(12),main=paste("conv. channel:",channel_name))
+  }
+  
+  for (i in 1:length(activations)) {
+    layer_activation <- activations[[i]]
+    layer_name <- model$layers[[activations_layers[i]]]$name
+    n_features <- dim(layer_activation)[[4]]
+    for (c in channels){
+      
+      channel_image <- layer_activation[1,,,c]
+      plot_channel(channel_image,layer_name,c)
+      
+    }
+  } 
+  
+}
+
+par(mfrow=c(1,3),mar=c(1,1,0,1),mai=c(0.1,0.1,0.3,0.1),cex=0.8)
+plotRGB(stack("./testarea_unet/subsets/25.jpg"), margins=T,main="input image")
+
+pretrained_unet <- load_model_hdf5("./pretrained_unet.h5")
+plot_layer_activations(img_path = "./testarea_unet/subsets/25.jpg", model=pretrained_unet ,activations_layers = 2, channels = c(1,2))
+```
+
+
+Both, dense and convolutional layers transform the input data. The form and impact of these transformations depend on the weights of the weighted sums (dense) or kernels (convolutional) as well as the biases. These are the parameters that a network learns during training. They carry the knowledge of the network. The parameters of a layer are also called its _state_. For more information on how to calculate the number of parameters of a certain layer, see [side note on layer parameters](#layer_parameters).
+In addition to dense layers and convolutional layers, we use two other layer types in our `first_model`. These layer types have no learned parameters and are therefore called _stateless_.
+
+
+#### Max Pooling Layers
+
+A maxpooling layer is used for downsampling input data to a coarser resolution. Similar to a convolutional layer, it applies a sliding window over the input. However, the result in this case is simply the maximum, i.e. the highest number of all pixels within the window.
+
+```{r,echo=F,out.width="60%", fig.align="center"}
+magick::image_draw(magick::image_read("./figures/maxpool_sketch.png"))
+```
+
+
+Maxpooling layers are used mainly for two reasons. First, the reduction of the resolution is meant to limit the size of the feature maps (as the number of features increases). Second, subsequent convolutional layers processing the output of a maxpooling layer see a condensed version of the feature maps of earlier convolutional layers that have been the input of that maxpooling layer. Stacking up combinations of convolutional layers followed by maxpooling layers enables the later convolutional layers to "see" increasingly larger spatial patterns.
+
+#### Flatten Layers
+
+The  function of this layer is to transform the output of the convolutional or maxpooling layers into something that the following dense layer can process to classify. As mentioned before, the dense layer simply takes all pixel values and computes a weighted sum. Technically these values need to be in the form of 1-D tensors (vectors) per input. The flatten layer simply prepares the data so that each 3D input is transferred to a vector by chaining together all pixels (in our example below the `(6,6,128)` is flattened to a vector of length 4608).
+
+
+#### Activation functions
+
+As mentioned earlier, a CNN comprises a series of layers doing transformations (convolutions, weighted sums) on an image that result in some (hopefully) meaningful representation of that image (the prediction result).
+All the transformations applied through the different layers are so far linear. If we would only apply linear transformations, the chain of all the transformations would basically still be one linear transformation. We would not gain anything by adding multiple layers.
+In order for the network to be able to learn non-linear relationships between inputs and outputs, activation functions are used.
+Below are three examples of activation functions. For more details, see [side note on activation functions](#activation_functions).
+
+
+```{r acti_funct_figure, out.width="100%",fig.asp=0.4, echo=F}
+par(mfrow=c(1,3),mar=c(5,2,5,2))
+input <- seq(-8,8,0.001)
+
+#step
+step_output <-lapply(input, FUN=function(x){
+  if(x>=0){return(1)}
+  else{return(0)}
+})
+plot(input,step_output, type="l", col="blue", ylab="step(input)",main="step activation function")
+abline(v=0,lty=3,lwd=2, col="grey")
+
+#sigmoid
+sig_output <- 1/(1+exp(-input))
+plot(input,sig_output, type="l", col="blue", ylab="sig(input)",main="sigmoid activation function")
+abline(v=0,lty=3,lwd=2, col="grey")
+
+#relu
+relu_output <-lapply(input, FUN=function(x)max(0,x))
+plot(input,relu_output, type="l", col="blue", ylab="reLU(input)",main="reLU activation function")
+abline(v=0,lty=3,lwd=2, col="grey")
+```
+
+
+There are quite a few activation functions to choose from and there are several things to keep in mind when choosing one of them for a specific layer. 
+As for this tuturial we will just keep in mind that reLu is one of the most popular activation functions for hidden layers in computer vision applications and is also used in all our examples. This means, the output of a convolutional layer for one pixel on a 1-band image as in the figure above would rather look like this: $o_1= relu(w_1i_1+w_2i_2+\dots+w_9i_9)$.
+
+For the output layer, the activation function can be chosen in order to fit the classification problem at hand. Since we are mainly looking at binary classification problems but also interested in the degree to which a subset fits the class "wildrye", the sigmoid activation function is most appropriate. 
+
+
+
+
+
+### Summary
+In summary: In CNNs, blocks of combined convolutional and maxpooling layers extract (hopefully meaningful) features from the images, those features becoming more complex and abstract with increasing number of blocks stacked together. This is the feature extraction part. The dense layers then perform the actual classification based on those extracted features. The flatten layer is merely the connection between convolutional layer and dense layer.
+Activation functions are use to enable the model to learn non-linear representations of the data.
+
+
+The following figure shows a sketch of the architecture. The arrows indicate the different layers, grey boxes symbolize the outputs (representation) produced by the layers. The small numbers on top of the boxes indicate the `depth` of the feature maps (i.e. number of features), the numbers to the side of the boxes indicate the spatial extent (rows and coloumns). The last three layers produce one-dimensional outputs, the numbers here indicate the number of values.
+
+```{r,out.width="100%",echo=F}
+magick::image_draw(magick::image_read("./figures/first_model.png"))
+```
+
+
+
+
+## Preparing your data {#dataprep}
+
+At this point, we´re going to look at the basic steps needed in order to read images and convert them into the format and structure expected by models in Keras. We will assume that the data is already sitting on our disk as subsets (images containing the targets are in folder `\true`, those without targets are in folder `\false`). We´ll later expand on this and have a look at how to get a larger remote sensing image into a model, how to work with masks instead of labels (for pixel-by-pixel classification), and how to include data augmentation to increase the training data set.
+
+For our initial example we only need to read in the training images and assign one label per image (1-> target is present, 0 -> target is not present). 
+
+Before actually reading the image files, we organize our data into training and validation data. The validation data will not be used for training (will not influence the adaption of parameters), but only for validating the results. We will use `initial_split()` function from the  `rsample()` package and we will do the split on the level of file paths.
+
+```{r organize_data}
+
+# get all file paths of the images containing our target
+subset_list <- list.files("./training_part1/true", full.names = T)
+
+# create a data.frame with two coloumns: file paths, and the labels (1)
+data_true <- data.frame(img=subset_list,lbl=rep(1L,length(subset_list)))
+
+# get all file paths of the images containing non-targets
+subset_list <- list.files("./training_part1/false", full.names = T)
+
+#creating a data.frame with two coloumns: file paths, and the labels (0)
+data_false <- data.frame(img=subset_list,lbl=rep(0L,length(subset_list)))
+
+#merge both data.frames
+data <- rbind(data_true,data_false)
+
+# randomly split data set into training (~75%) and validation data (~25%)
+# use `lbl` as stratum, so that the split is being done proportional for
+# targets and non-targets
+set.seed(2020)
+data <- initial_split(data,prop = 0.75, strata = "lbl")
+```
+
+We now have an `rsplit` object that organizes the training and validation data for us.
+We can use `training()` to access the training data and `testing()` to access the validation data, each in the form of a `data.frame` that holds the file paths of the images and the corresponding labels.
+
+```{r r-split}
+data
+
+head(training(data)) # returns the the first few entries in the training data.frame
+
+head(testing(data)) # returns the first few entries of the data set aside for validation
+
+# compare the number of files in the training data, that show non-targets vs, those that
+# show targets -> should be similiar
+c(nrow(training(data)[training(data)$lbl==0,]), nrow(training(data)[training(data)$lbl==1,]))
+
+
+
+```
+
+
+Now we can read the data, converting it into the format we need for feeding our network.
+In `keras` and `tensorflow` we work with so called "tensors" as the basic data structure. Tensors are "a generalization of vectors and matrices to an arbitrary number of dimensions" [@Chollet2018]. In R we could 'translate' tensors of different dimensions (ranks) to our familiar data types like this:
+
+- 0D tensor: scalar (just one number)
+- 1D tensor: vector
+- 2D tensor: matrix
+- 3D tensor and any higher-dimensional tensor: multidimensional array
+
+Please note, that multiple samples (in our case images) are usually collected in one tensor (e.g. one tensor holds all images of one batch according to batch size, see below). The first dimension of the tensor is the number of samples. This means that when analyzing images, we are mainly dealing with 4D-tensors, the dimensions being: 
+
+- 1st dimension: no. of samples
+- 2nd dimension: no. of rows (y)
+- 3rd dimension: no. of coloumns (x)
+- 4th dimension: no. of channels/bands. 
+
+For example a tensor of shape `(2,448,448,3)` holds two images of size 448 by 448 pixels and 3 bands. We will check this again later when we have imported some data.
+
+Since our data is usually in some image file format (tif, jpg...), we have to read and convert it into tensors as expected by our model. In addition, we have to do some preprocessing. There are different tools available to help us do that. Here we will use the `tfdatasets` package for organizing our preprocessing pipeline.
+The first function we use is `tensor_slices_dataset()`. This creates a dataset that has one element for each pair of images and labels. 
+
+```{r prepare_data 1}
+
+#prepare training dataset
+training_dataset <- tensor_slices_dataset(training(data))
+```
+
+This has created a `tf_dataset`, that has one element for each training data pair (with components image and corresponding label). Accordingly, each element is a list with two items, "img" and "lbl".
+
+Up to now, the image component is only the file path of the image (a tensor of data type string), the label component is the label (tensor of type "int").
+
+If we would like to inspect the elements of our `tf_dataset`, we can do that like this:
+
+```{r}
+#if you want to get a list of all tensors, you can use the as_iterator() and iterate() functions
+dataset_iterator <- as_iterator(training_dataset)
+dataset_list <- iterate(dataset_iterator)
+#check the first few items of that list, each item one is again a list with two items: img and lbl
+head(dataset_list)
+
+```
+
+This might seem a bit strange to you. We need to follow the "iterator" concept of Python if we want to access elements of a `tf_dataset`. 
+For more info on this, see [side note on iterators](#iterators).
+
+
+Now that we have a `tf_dataset`, we can use the `dataset_map()` function to apply methods to all elements of the dataset. This makes the following preprocessing steps easier. We will use it to transform the image components of our dataset (currently only file paths) into tensors of suitable shape.
+
+The concept that we use to do this in the following code chunk is:
+
+- We use `dataset_map()` to apply a function on each element of the dataset
+- Since each element is a list of two tensors, the function we apply is `list_modify()`
+- `list_modify()` in turn modifies list items 
+- we use it to apply functions to the `img` list items, i.e. all our images (not the labels, later -when working with masks- we can modify them simultaneously, which is useful when doing [data augmentation](#data_augmentation))
+
+The functions that we apply will transform the images to the desired tensors in three steps:
+
+1. read the images from the specific file paths (decoding the jpgs into tensors)
+2. convert data type to floating point values from 0 to 1 (see [side note on value normalization](#value_normalization))
+3. resize the images to the size expected by the model (128 by 128 pixels), in case they are of different size
+
+These functions are available through the `tf.image` and `tf.io` python modules of the Tensoflow Python API. Since the `tensorflow` package provides access to this API, we can access them using the `$` operator, e.g.: `tf$image$resize` uses the `resize` method from the `tf.image` module.
+
+```{r prepare_data_2}
+
+#get input shape expected by first_model
+subset_size <- first_model$input_shape[2:3]
+
+# apply function on each dataset element: function is list_modify()
+#->modify list item "img" three times:
+
+# 1 read decode jpeg
+training_dataset <- 
+  dataset_map(training_dataset, function(.x)
+   list_modify(.x, img = tf$image$decode_jpeg(tf$io$read_file(.x$img))))
+  
+# 2 convert data type
+training_dataset <- 
+  dataset_map(training_dataset, function(.x)
+   list_modify(.x, img = tf$image$convert_image_dtype(.x$img, dtype = tf$float32)))
+  
+# 3 resize to the size expected by model
+training_dataset <- 
+  dataset_map(training_dataset, function(.x)
+   list_modify(.x, img = tf$image$resize(.x$img, size = shape(subset_size[1], subset_size[2]))))
+```
+
+
+Now the data is almost ready. We just need to shuffle the data using the function `dataset_shuffle()` and make batches using the function `dataset_batch()`. Since our samples are still ordered by class, the shuffling is done to make sure we don´t start training only on images with targets. The batches are needed because the learning is not done on the whole dataset at once, but in batches of data (see below). As the last step we remove the names of the list elements ("img" and "lbl").
+
+
+```{r prepare_data_3}
+training_dataset <- dataset_shuffle(training_dataset, buffer_size = 10L*128)
+training_dataset <- dataset_batch(training_dataset, 10L)
+training_dataset <- dataset_map(training_dataset, unname)
+```
+
+If we now look at a single element of our dataset, we can see how the data was modified. Let´s look at the first tensor holding the first batch of images:
+
+```{r}
+dataset_iterator <- as_iterator(training_dataset)
+dataset_list <- iterate(dataset_iterator)
+dataset_list[[1]][[1]]
+
+``` 
+
+This line results in a preview of the tensor, showing (a excerpt from) its content, the shape and the dtype.
+This is a 4D tensor of shape `(10,128,128,3)` so there are 10 images, each of size 128*128 px, and with 3 channels (RGB), the dtype is float. As mentioned before, the first dimension is the samples or batch dimension. Since we defined a batch size of 10, this tensor has a size of 10 in the first dimension.  
+We can also directly output the shape to limit the size of the output:
+
+```{r}
+dataset_list[[1]][[1]]$shape
+
+```
+
+
+The corresponding label tensor looks like this:
+```{r}
+dataset_list[[1]][[2]]
+``` 
+
+It merely holds the then digits indicating the labels (one per image), thus it only has one dimension of size 10.
+
+Our training data is now ready.
+Let´s prepare the validation dataset. We apply the same steps as to the training dataset (except the shuffling which is not necessary for the validation dataset).
+
+```{r prepare_val_dat}
+
+#validation
+validation_dataset <- tensor_slices_dataset(testing(data))
+
+validation_dataset <- 
+  dataset_map(validation_dataset, function(.x)
+   list_modify(.x, img = tf$image$decode_jpeg(tf$io$read_file(.x$img))))
+
+validation_dataset <- 
+  dataset_map(validation_dataset, function(.x)
+   list_modify(.x, img = tf$image$convert_image_dtype(.x$img, dtype = tf$float32)))
+
+validation_dataset <- 
+  dataset_map(validation_dataset, function(.x)
+   list_modify(.x, img = tf$image$resize(.x$img, size = shape(subset_size[1], subset_size[2]))))
+
+validation_dataset <- dataset_batch(validation_dataset, 10L)
+validation_dataset <- dataset_map(validation_dataset, unname)
+
+```
+
+
+
+We now have two `tf_dataset` objects containing our training and validation data, respectively, as tensors. These datasets can be fed into our model for training.
+
+
+
+## Training your model/network {#train}
+
+
+The first step is to configure/prepare the model for training. We do this using the `compile()` function on our model.
+
+This is how we compile the network:
+```{r training, eval=T}
+compile(
+  first_model,
+  optimizer = optimizer_rmsprop(lr = 5e-5),
+  loss = "binary_crossentropy",
+  metrics = "accuracy"
+  )
+```
+
+
+This function allows us to specify some parameters for the training. Here we choose the `optimizer` (including learning rate `lr`), the `loss` function, and one or more accuracy metrics for measuring/visualizing the models performance (metrics are not used for training).
+
+The key words `optimizer`, `learning rate` and `loss` are associated with the general workflow that is used during training:
+
+
+
+(1) The network runs on a randomly drawn batch of the training data and computes the outputs/predictions. 
+
+(2) The outputs are compared to the corresponding label and the loss (how far off are our predictions with respect to the labels) is calculated using the defined `loss` function. 
+
+(3) The parameters of the layers are then adjusted a little bit to reduce the loss on the current batch, using the `optimizer` and the learning rate `lr`. 
+
+After step (3), the network processes the next batch of data with the new parameters. This is repeated for as long as we determine in the `fit` method (see below). 
+
+This workflow is called _(mini-batch) stochastic gradient descent_ (mini-batch SGD) and there many different variants. The `optimizer` specifies which one to use.
+
+
+```{r,echo=F,out.width="80%",fig.align="center"}
+magick::image_draw(magick::image_read("./figures/training_workflow.png"))
+```
+
+
+Let´s briefly look into the arguments that we specify when calling `compile()`: 
+
+**Loss function:** The loss function specifies in what way the loss of the network is computed, i.e. how we measure the differences between prediction and label. For binary classification problems, the binary crossentropy is a commonly used loss function, which we will also stick to throughout this tutorial (for a bit more info, see side note on [binary crossentropy](#binary_crossentropy))
+
+**Optimizer:** The optimizer is the specific algorithm used for adapting the parameters during each training iteration such that the loss is reduced. It specifies _how_ the parameters are adjusted. 
+In this tutorial, we will stick to `rmsprop` (for a short explanation, see side note on [optimizers and gradient descent](#optimizers))
+
+**Learning rate:** The learning rate specifies the size of the steps taken in adapting the parameters during each iteration, i.e. _how strongly_ the weights are being adjusted. A larger learning rate means faster training, but if it is too large this can result in unstable training.
+
+**Metric**: This values signals us after  each epoch the accuracy of our model on the validation data. Here we use `accuracy` which simply calculates the fraction of samples that are classified correctly into 0 or 1 (automatically applying a threshold of 0.5 for the decision between 0 and 1).
+
+Note, that assigning the result of `compile()` again to `first_model` is not necessary because of the in-place-modification.
+
+
+The next step is to start the actual training. This is done using the function `fit()` on our model. 
+
+```{r fit, eval=T}
+diagnostics <- fit(first_model,
+               training_dataset,
+               epochs = 15,
+               validation_data = validation_dataset)
+
+plot(diagnostics)+geom_smooth(method = "loess",se=F)
+```
+
+Here we defined three arguments: the training and validation datasets that we have just created, and the number of epochs, i.e. how often the network will iterate over all training data: When all data has been processed batch by batch following the workflow mentioned above, one `epoch` is finished. This whole process will be repeated for as many times as specified by the argument `epochs`.
+
+Assigning the result of `fit()` to a variable (here `diagnostics`) causes the training history (loss and accuracy metrics after each iteration) to be stored in that variable. We can then e.g. plot the training curves.
+
+
+## Predicting with your model
+
+Once we have finished the training, we can use our trained model for predictions on new data.
+This is done using the `predict()` function. It needs as arguments the model to use for prediction and the dataset on which to predict. Let´s first try it on our validation data.
+
+```{r predict_validation_dataset}
+
+predictions <- predict(first_model,validation_dataset)
+head(predictions)
+tail(predictions)
+
+```
+
+Since we only predict one label per image (target or no target), the result (`predictions`) is a matrix with only one coloumn and 57 rows (the number of images we have processed). Each number represents the calculated probability for a target.
+
+
+
+Let´s randomly visualize some results on the validation data set:
+
+```{r show_results, message=F, out.width="100%", fig.asp=0.4, echo=T}
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.3,0.1),cex=0.8)
+for(i in 1:3){
+  sample <- floor(runif(n = 1,min = 1,max = 56))
+  img_path <- as.character(testing(data)[[sample,1]])
+  img <- stack(img_path)
+  plotRGB(img,margins=T,main = paste("prediction:",round(predictions[sample],digits=3)," | ","label:",as.character(testing(data)[[sample,2]])))
+  }
+
+```
+
+
+
+We can now try to predict on the actual test area. Again, we will for now assume the data to already sit on our disk as subsets, so we just have to import the data run the model on it.
+
+```{r prepare_testarea}
+
+# get all file paths of the images of our test area
+subset_list <- list.files(path="./testarea_part1/subsets/", full.names = T)
+```
+
+We will use a similar workflow as shown in the [Preparing your data](#dataprep) section, but we can skip some of the steps when doing prediction (e.g. shuffling, assigning labels).
+
+
+```{r hidden_order, echo=F}
+o <- order(as.numeric(tools::file_path_sans_ext(list.files("./testarea_part1/subsets/"))))
+subset_list <- list.files("./testarea_part1/subsets/", full.names = T)[o]
+```
+
+```{r predict_testarea}
+dataset <- tensor_slices_dataset(subset_list)
+dataset <- dataset_map(dataset, function(.x) 
+    tf$image$decode_jpeg(tf$io$read_file(.x))) 
+dataset <- dataset_map(dataset, function(.x) 
+    tf$image$convert_image_dtype(.x, dtype = tf$float32)) 
+dataset <- dataset_map(dataset, function(.x) 
+  tf$image$resize(.x, size = shape(128, 128))) 
+dataset <- dataset_batch(dataset, 10L)
+dataset <-  dataset_map(dataset, unname)
+
+predictions <- predict(first_model, dataset)
+
+```
+
+Instead of checking single tiles, let´s look at how the result looks when reassembled on the map (no worries, youl´ll see one way how to do the reassembling in part II).
+Here, all tiles with probability for wildrye of $<0.5$ have been removed.
+
+```{r hidden_rebuild_map, echo = F, warning=F,results=F,message=F}
+predictions <- array(data= rep(predictions,128*128),dim = c(length(predictions),128,128,1))
+
+input_img <- stack("./testarea_part1/testarea_crop.tif")
+
+
+
+rebuild_img <- function(subsets,out_path,target_rst){
+  require(raster)
+  require(gdalUtils)
+  require(stars)
+  
+  
+  subset_pixels_x <- ncol(subsets[1,,,])
+  subset_pixels_y <- nrow(subsets[1,,,])
+  tiles_rows <- nrow(target_rst)/subset_pixels_y
+  tiles_cols <- ncol(target_rst)/subset_pixels_x
+  
+  # load target image to determine dimensions
+   target_stars <- st_as_stars(target_rst,proxy=F)
+   #prepare subfolder for output
+   result_folder <- paste0(out_path,"out")
+   if(dir.exists(result_folder)){
+     unlink(result_folder,recursive = T)
+   }
+   dir.create(path = result_folder)
+   
+  #for each tile, create a stars from corresponding predictions, 
+  #assign dimensions using original/target image, and save as tif: 
+  for (crow in 1:tiles_rows){
+    for (ccol in 1:tiles_cols){
+      i <- (crow-1)*tiles_cols + (ccol-1) +1 
+      
+      dimx <- c(((ccol-1)*subset_pixels_x+1),(ccol*subset_pixels_x))
+      dimy <- c(((crow-1)*subset_pixels_y+1),(crow*subset_pixels_y))
+      cstars <- st_as_stars(t(subsets[i,,,1]))
+      attr(cstars,"dimensions")[[2]]$delta=-1
+      #set dimensions using original raster
+      st_dimensions(cstars) <- st_dimensions(target_stars[,dimx[1]:dimx[2],dimy[1]:dimy[2]])[1:2]
+     
+      write_stars(cstars,dsn = paste0(result_folder,"/_out_",i,".tif")) 
+    }
+  }
+  
+  #mosaic the created tifs
+  
+  starstiles <- as.vector(list.files(result_folder,full.names = T),mode = "character")
+  gdalbuildvrt(starstiles,paste0(result_folder,"/mosaic.vrt"))
+  gdalwarp(paste0(result_folder,"/mosaic.vrt"), paste0(result_folder,"/mosaic.tif"))
+  
+}
+
+rebuild_img(predictions,out_path = "./testarea_part1/",target_rst = input_img)
+
+result_map <- raster("./testarea_part1/out/mosaic.tif")%>%readAll()
+result_map[result_map[[1]]<0.5] <- NA
+
+agg <- suppressMessages(aggregate(result_map[[1]],c(128,128),fun="max"))
+result_scratch <- suppressMessages(rasterToPolygons(agg))
+
+
+```
+
+```{r hidden_map, echo = F, warning=F,results=T,message=F,out.width="100%"}
+viewRGB(input_img,layer.name = "Input image", quantiles = c(0,1),r=1,g=2,b=3)+mapview(result_scratch,layer.name="wildrye prediction",alpha.regions=0.4,na.alpha=0,col.regions =c("blue","red","yellow"))
+``` 
+
+
+If you want to save a model, you can do that by:
+```{r save_model}
+
+save_model_hdf5(first_model,filepath = "./my_first_model.h5")
+
+```
+
+Given the rather puristic model and low number of training samples, the result doesn´t look too bad. However, there are some issues with it. The most prominent one is that we are predicting on the level of image tiles. Although the size of the tiles is already pretty small, there are still a number of mixed tiles (target and non-target). Those tiles are harder to train on and to predict, and the prediction is more likely to be wrong. In addition, even if it correctly identifies the presence of the target, this result is of course only true for parts of the such a tile. We cannot easily tell where and to what degree the target is present in the subset.
+While we could further reduce the tile size and thereby increase the spatial "resolution" of the result, this would also decrease the degree to which spatial context can be taken into account, and it would increase the technical overhead of managing a lot of image subsets. For spatial applications, it would be much more appealing to receive a result on a pixel-basis, where our level of detail is not depending on the tile size.
+
+In part II, we will look at a model architecture called "U-net" which allows our model to make pixel-by-pixel predictions within image tiles while still taking the spatial context of pixels into account.
+In addition, we will look at a few common techniques (transfer learning, data augmentation), that can improve our training and prediction. Finally, we will have a look at how to get from a remote sensing image to the subsets on which neural networks train, and from the resulting prediction tiles back to a prediction map of the area.
+
+
+# Part II: Extensions
+
+
+
+## Using pretrained networks
+
+One big advantage of deep learning is the portability of learned patterns. As mentioned above, the first layers of a CNN mainly extract generic features and patterns (edges of various forms and directions, patterns and arrangements of pixel values). Even if it was trained on a completely different dataset, these feature extractors may be useful for our use case as well. In the following example, we use a CNN called "VGG16" [@Simonyan2014], that was trained on the ["ImageNet"](http://image-net.org/index) dataset.
+
+
+```{r,echo=F}
+unet_scratch <- magick::image_read("./figures/first_model.png")
+unet_pretrained<- magick::image_read("./figures/pretrained_model.png")
+magick::image_animate(c(unet_scratch,unet_pretrained),fps=1)
+```
+
+This data set consists of animals and everyday objects like cats, bikes, balloons and so on. However, using the first layers for feature extraction works for us too in extracting features from our images that we can use to distinguish between targets and non-targets. We will use the first 15 layers as a basis and just add "our own" dense layers for conducting the actual classification. For some further thoughts on this form of transfer learning, [see this side note](#transfer_learning)
+
+
+```{r pretrained_image_rec}
+# load vgg16 as basis for feature extraction
+vgg16_feat_extr <- application_vgg16(include_top = F,input_shape = c(128,128,3),weights = "imagenet")
+#freeze weights
+freeze_weights(vgg16_feat_extr)
+#use only layers 1 to 15
+pretrained_model <- keras_model_sequential(vgg16_feat_extr$layers[1:15])
+
+
+
+# add flatten and dense layers for classification 
+# -> these dense layers are going to be trained on our data only
+pretrained_model <- layer_flatten(pretrained_model)
+pretrained_model <- layer_dense(pretrained_model,units = 256,activation = "relu")
+pretrained_model <- layer_dense(pretrained_model,units = 1,activation = "sigmoid")
+
+
+
+pretrained_model
+```
+
+The function `freeze_weights()` can be used to freeze the parameters of (parts of) or model, so they don´t get updated during training. As you can see, this model is more complex, but since we will only train the dense layers on our data, we don´t have to learn all the parameters of the model.
+
+
+Let´s see how training works on this one.
+
+```{r fit_pretrained_image_rec}
+
+compile(
+  pretrained_model,
+  optimizer = optimizer_rmsprop(lr = 1e-5),
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+  )
+
+diagnostics <- fit(pretrained_model,
+               training_dataset,
+               epochs = 6,
+               validation_data = validation_dataset)
+plot(diagnostics)+geom_smooth(method = "loess",se=F)
+```
+
+We can see, that now the training curve flattens at a high accuracy already after ~3-5 epochs.
+The  metrics are:
+```{r}
+diagnostics$metrics
+```
+
+Predicting the test area with this model gives:
+
+```{r predtict_pretrained_image_rec, echo=F, warning=F,results=F}
+
+predictions <- predict(pretrained_model,dataset)
+predictions <- array(data= rep(predictions,128*128),dim = c(length(predictions),128,128,1))
+
+if(!dir.exists("./testarea_part1/pretrained/")){dir.create("./testarea_part1/pretrained/")}
+rebuild_img(predictions,out_path = "./testarea_part1/pretrained/",target_rst = input_img)
+
+result_map <- raster("./testarea_part1/pretrained/out/mosaic.tif")%>%readAll()
+result_map[result_map[[1]]<0.5] <- NA
+
+agg <- suppressMessages(aggregate(result_map[[1]],c(128,128),fun="max"))
+result_pretr <- suppressMessages(rasterToPolygons(agg))
+
+```
+
+```{r show_result_pretrained, echo=F, warning=F,results=T, out.width="100%"}
+viewRGB(input_img,layer.name = "input image",quantiles = c(0,1),r=1,g=2,b=3)+mapview(result_pretr,layer.name="wildrye prediction", alpha.regions=0.4,na.alpha=0,col.regions =c("blue","red","yellow"))
+```
+
+
+
+## From image to pixel-by-pixel classification
+
+Up to now, we have conducted a simple binary image classification. In the next step we will build a model that is able of a pixel-by-pixel classification. Instead of telling us _if_ there is a target object present in an image subset it tells us _where_ in the image a target is present. To build such a model we will adopt the model architecture of a U-net, proposed by [@Ronneberger2015]
+
+The typical architecture is shown in the figure below. It as a sketch of a largely simplified version only for illustration. The original has a lot more layers
+
+```{r,echo=F, fig.align="center"}
+magick::image_draw(magick::image_read("./figures/unet_small.png"))
+```
+
+
+The idea is the following: The network starts with a sequence of convolutional and maxpooling layers. As we have seen before, this sequence extracts features and spatial patterns of growing complexity (with growing number of convolutional/maxpooling blocks). This part is also called the _contracting path_  of the network. The extraction of ever more complex and abstract features happens 'at the cost' of downsampling the resolution, thus loosing information about where exactly certain features are.
+
+This path is not much different from the network architecture we have looked at so far. After the last maxpooling layer we could simply insert a flatten layer and one or two dense layers and we would end up with a CNN doing image classification for us. The network would be more complex than the one we have built before (in that it has more convolutional layers and therefore learns more complex spatial structures) but the idea would still be the same. 
+
+The U-net architecture does not stop here, but instead adds another part (the second half of the "U"), which is also called the _expansive path_. 
+In this expansive path of the network, the feature maps are being resampled back to the same resolution as the input image. This is done by a sequence of upsampling and convolutional layers. The important trick here is that the feature maps are not just simply upsampled, but also combined with the outputs of the corresponding (in terms of resolution) layers in the contracting path that carry the high-resolution features that were originally extracted there (pictured by the grey arrows). This is done by concatenating the layers. As a result, the successive convolutional layers take into account the information on complex spatial patterns aggregated in the whole contracting path, _but also_ the high-resolution features originally extracted at the level of the corresponding intermediate layer of the contracting path. Thus, it is able to more precisely localize the targets within the image subset.
+
+Let´s try to build a simple U-net on our own. The architecture will be a small, slightly adapted version of the one proposed [@Ronneberger2015] , here with only 2 convolutional and 2 upsampling blocks, as shown in the figure above.
+
+
+
+```{r simple_Unet}
+
+## we start with the "contratcing path"##
+# input
+input_tensor <- layer_input(shape = c(448,448,3))
+
+#conv block 1
+unet_tensor <- layer_conv_2d(input_tensor,filters = 64,kernel_size = c(3,3), padding = "same",activation = "relu")
+conc_tensor2 <- layer_conv_2d(unet_tensor,filters = 64,kernel_size = c(3,3), padding = "same",activation = "relu")
+unet_tensor <- layer_max_pooling_2d(conc_tensor2)
+
+#conv block 2
+unet_tensor <- layer_conv_2d(unet_tensor,filters = 128,kernel_size = c(3,3), padding = "same",activation = "relu")
+conc_tensor1 <- layer_conv_2d(unet_tensor,filters = 128,kernel_size = c(3,3), padding = "same",activation = "relu")
+unet_tensor <- layer_max_pooling_2d(conc_tensor1)
+
+#"bottom curve" of unet
+unet_tensor <- layer_conv_2d(unet_tensor,filters = 256,kernel_size = c(3,3), padding = "same",activation = "relu")
+unet_tensor <- layer_conv_2d(unet_tensor,filters = 256,kernel_size = c(3,3), padding = "same",activation = "relu")
+
+##  this is where the expanding path begins ##
+
+# upsampling block 1
+unet_tensor <- layer_conv_2d_transpose(unet_tensor,filters = 128,kernel_size = c(2,2),strides = 2,padding = "same") 
+unet_tensor <- layer_concatenate(list(conc_tensor1,unet_tensor))
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 128, kernel_size = c(3,3),padding = "same", activation = "relu")
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 128, kernel_size = c(3,3),padding = "same", activation = "relu")
+
+# upsampling block 2
+unet_tensor <- layer_conv_2d_transpose(unet_tensor,filters = 64,kernel_size = c(2,2),strides = 2,padding = "same")
+unet_tensor <- layer_concatenate(list(conc_tensor2,unet_tensor))
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 64, kernel_size = c(3,3),padding = "same", activation = "relu")
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 64, kernel_size = c(3,3),padding = "same", activation = "relu")
+
+# output
+unet_tensor <- layer_conv_2d(unet_tensor,filters = 1,kernel_size = 1, activation = "sigmoid")
+
+# combine final unet_tensor (carrying all the transformations applied through the layers) 
+# with input_tensor to create model
+
+unet_model <- keras_model(inputs = input_tensor, outputs = unet_tensor)
+
+
+```
+
+Looking at the code chunk above, you will have noticed that we use a slightly different way of stacking layers together in this example. This is because now we are not using the sequential model as before, but the _functional API_ in Keras, which is a more general and more flexible way to build models. As mentioned in [the section on building a model](#build_model) the sequential model using `keras_model_sequential()` works just fine for many use cases. In this example however, we need a more flexible solution, because we are not building a directed linear stack of layers, but try to reinject intermediate layer outputs into further downstream layers of the model. I´ll leave you with this short description for now, for more info on how to use the functional API, see [the corresponding side note](#functional_API).
+For the upsampling, [transposed convolution](#transp_conv) is used. 
+
+
+
+### Using pretrained layers in a U-net
+
+We can adopt the strategy of using parts of a pretrained model also in our U-net. As mentioned before, the contracting path is very similar to image recognition models like the one we have built in part I. It is even more similar to VGG16. What if we could use some of the first layers of the pretrained VGG16 model for feature extraction in the contracting path of our U-net, and just add the expanding path?
+The following code shows how to do that:
+
+```{r pretrained_unet}
+
+## load pretrained vgg16 and use part of it as contracting path (feature extraction) ##
+vgg16_feat_extr <- application_vgg16(weights = "imagenet", include_top = FALSE, input_shape = c (448,448,3))
+
+# optionally freeze first layers to prevent changing of their weights, either whole convbase or only certain layers
+# freeze_weights(vgg16_feat_extr) #or:
+# freeze_weights(vgg16_feat_extr, to = "block1_pool") 
+
+# we'll not use the whole model but only up to layer 15
+unet_tensor <- vgg16_feat_extr$layers[[15]]$output 
+
+
+## add the second part of 'U' for segemntation ##
+
+# "bottom curve" of U-net
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 1024, kernel_size = 3, padding = "same", activation = "relu")
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 1024, kernel_size = 3, padding = "same", activation = "relu")
+
+# upsampling block 1
+unet_tensor <- layer_conv_2d_transpose(unet_tensor, filters = 512, kernel_size = 2, strides = 2, padding = "same")
+unet_tensor <- layer_concatenate(list(vgg16_feat_extr$layers[[14]]$output, unet_tensor))
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 512, kernel_size = 3, padding = "same", activation = "relu")
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 512, kernel_size = 3, padding = "same", activation = "relu")
+
+# upsampling block 2
+unet_tensor <- layer_conv_2d_transpose(unet_tensor, filters = 256, kernel_size = 2, strides = 2, padding = "same")
+unet_tensor <- layer_concatenate(list(vgg16_feat_extr$layers[[10]]$output, unet_tensor))
+unet_tensor <- layer_conv_2d(unet_tensor,filters = 256, kernel_size = 3, padding = "same", activation = "relu")
+unet_tensor <- layer_conv_2d(unet_tensor,filters = 256, kernel_size = 3, padding = "same", activation = "relu")
+
+# upsampling block 3
+unet_tensor <- layer_conv_2d_transpose(unet_tensor, filters = 128, kernel_size = 2, strides = 2, padding = "same")
+unet_tensor <- layer_concatenate(list(vgg16_feat_extr$layers[[6]]$output, unet_tensor))
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 128, kernel_size = 3, padding = "same", activation = "relu")
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 128, kernel_size = 3, padding = "same", activation = "relu")
+
+# upsampling block 4
+unet_tensor <- layer_conv_2d_transpose(unet_tensor, filters = 64, kernel_size = 2, strides = 2, padding = "same")
+unet_tensor <- layer_concatenate(list(vgg16_feat_extr$layers[[3]]$output, unet_tensor))
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 64, kernel_size = 3, padding = "same", activation = "relu")
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 64, kernel_size = 3, padding = "same", activation = "relu")
+
+# final output 
+unet_tensor <- layer_conv_2d(unet_tensor, filters = 1, kernel_size = 1, activation = "sigmoid")
+
+# create model from tensors
+pretrained_unet <- keras_model(inputs = vgg16_feat_extr$input, outputs = unet_tensor)
+
+```
+
+
+```{r,echo=F}
+unet_scratch <- magick::image_read("./figures/unet.png")
+unet_pretrained<- magick::image_read("./figures/pretrained_unet.png")
+magick::image_animate(c(unet_scratch,unet_pretrained),fps=1)
+```
+
+
+Before we can train our new U-net and see how it performs on the data, we have to prepare our training samples again. This time we have to prepare them differently because we are now not aiming for an image classification (a prediction between "0" and "1" per image) but for a pixel-by-pixel classification. Accordingly, we now need training data with "labels" on a pixel basis, too. We therefore need masks that we get from digitizing the training data and that need to be prepared as image subsets like the training images, one mask subset for each image subset. Each masks consists of pixels of value 1 (target) or zero (non-target/background). 
+
+While preparing this new data, we also want to adopt one more strategy that can help tackle small-data problems: data augmentation.
+
+
+## Data augmentation {#data_augmentation}
+
+One popular way to synthetically increase the amount of training data is to use data augmentation. This means applying image transformations and manipulations to the training data, that result in synthetic new images to train on. `keras` provides quite a few image augmentation techniques as part of its image preprocessing pipeline. In our tutorial we do not use this pipeline, but instead apply the `tfdatasets` package. Luckily, the tensorflow module itself also provides functions for simple image augmentation. Examples are:
+
+- `tf$image$flip_left_right()`
+- `tf$image$flip_up_down()`
+
+In addition to geometric manipulations like flipping or rotating images, we can make spectral manipulations to simulate different light conditions, e.g.:
+
+- `tf$image$random_brightness()`
+- `tf$image$random_saturation()`
+
+
+The following function (adapted from: https://blogs.rstudio.com/ai/posts/2019-08-23-unet/ (accessed 2020-08-12)) applies small random changes to brightness, saturation and hue of images.
+
+```{r spectral_augmentation}
+spectral_augmentation <- function(img) {
+  img <- tf$image$random_brightness(img, max_delta = 0.3) 
+  img <- tf$image$random_contrast(img, lower = 0.8, upper = 1.2)
+  img <- tf$image$random_saturation(img, lower = 0.8, upper = 1.2) 
+    # make sure we still are between 0 and 1
+  img <- tf$clip_by_value(img,0, 1) 
+}
+```
+
+Now we have some methods at hand to augment our small training dataset. Since we will use masks as reference for our next model, we have to keep in mind to also change those masks whenever we apply geometric transformations (because otherwise the masks won´t fit anymore). Here, the approach using `tfdatasets` from above comes in handy, because it allows to systematically apply functions to `dataset` elements or parts of these elements and helps us to simultaneously make the same geometric manipulations to images and the corresponding masks.
+
+The following function prepares the dataset and -in case of training data- applies three different augmentations on the input:
+
+- flip images (and masks) left to right
+- flip images (and masks) up and down
+- combine left-right and up-down flip on images (and masks)
+
+During each of these augmentations the function also applies `spectral_augmentation()` to the images (not the masks!) to increase the differences to the originals and simulate different light conditions.
+
+The following function combines all these augmentations with the image preparation. In addition, it can also be used for preparing data for prediction (set `predict` to `TRUE`). It then skips all augmentation etc. steps and just reads and prepares the images as a `tfdataset`. The function expects a data.frame or tibble holding the file paths of the images and masks with name `img` and `mask`. In `predict =T` mode, it instead expects just the path to the folder where the subsets are.
+
+
+```{r prepare_with_augmentation}
+
+#adapted from: https://blogs.rstudio.com/ai/posts/2019-08-23-unet/ (accessed 2020-08-12)
+
+dl_prepare_data <- function(files=NULL, train, predict=FALSE, subsets_path=NULL, model_input_shape = c(448,448), batch_size = 10L) {
+  
+  if (!predict){
+    
+    #function for random change of saturation,brightness and hue, 
+    #will be used as part of the augmentation
+    spectral_augmentation <- function(img) {
+      img <- tf$image$random_brightness(img, max_delta = 0.3)
+      img <- tf$image$random_contrast(img, lower = 0.8, upper = 1.1)
+      img <- tf$image$random_saturation(img, lower = 0.8, upper = 1.1)
+      # make sure we still are between 0 and 1
+      img <- tf$clip_by_value(img, 0, 1)
+    }
+    
+    
+    #create a tf_dataset from the input data.frame 
+    #right now still containing only paths to images 
+    dataset <- tensor_slices_dataset(files)
+    
+    #use dataset_map to apply function on each record of the dataset 
+    #(each record being a list with two items: img and mask), the 
+    #function is list_modify, which modifies the list items
+    #'img' and 'mask' by using the results of applying decode_jpg on the img and the mask   
+    #-> i.e. jpgs are loaded and placed where the paths to the files were (for each record in dataset)
+    dataset <- 
+      dataset_map(dataset, function(.x) 
+        list_modify(.x,img = tf$image$decode_jpeg(tf$io$read_file(.x$img)),
+                       mask = tf$image$decode_jpeg(tf$io$read_file(.x$mask)))) 
+    
+    #convert to float32:
+    #for each record in dataset, both its list items are modyfied 
+    #by the result of applying convert_image_dtype to them
+    dataset <- 
+      dataset_map(dataset, function(.x) 
+        list_modify(.x, img = tf$image$convert_image_dtype(.x$img, dtype = tf$float32),
+                        mask = tf$image$convert_image_dtype(.x$mask, dtype = tf$float32))) 
+    
+    #resize:
+    #for each record in dataset, both its list items are modified 
+    #by the results of applying resize to them 
+    dataset <- 
+      dataset_map(dataset, function(.x) 
+        list_modify(.x, img = tf$image$resize(.x$img, size = shape(model_input_shape[1], model_input_shape[2])),
+                        mask = tf$image$resize(.x$mask, size = shape(model_input_shape[1], model_input_shape[2]))))
+    
+    
+    # data augmentation performed on training set only
+    if (train) {
+      
+      #augmentation 1: flip left right, including random change of 
+      #saturation, brightness and contrast
+      
+      #for each record in dataset, only the img item is modified by the result 
+      #of applying spectral_augmentation to it
+      augmentation <- 
+        dataset_map(dataset, function(.x) 
+          list_modify(.x, img = spectral_augmentation(.x$img)))
+      
+      #...as opposed to this, flipping is applied to img and mask of each record
+      augmentation <- 
+        dataset_map(augmentation, function(.x) 
+          list_modify(.x, img = tf$image$flip_left_right(.x$img),
+                          mask = tf$image$flip_left_right(.x$mask)))
+      
+      dataset_augmented <- dataset_concatenate(dataset,augmentation)
+      
+      #augmentation 2: flip up down, 
+      #including random change of saturation, brightness and contrast
+      augmentation <- 
+        dataset_map(dataset, function(.x) 
+          list_modify(.x, img = spectral_augmentation(.x$img)))
+      
+      augmentation <- 
+        dataset_map(augmentation, function(.x) 
+          list_modify(.x, img = tf$image$flip_up_down(.x$img),
+                          mask = tf$image$flip_up_down(.x$mask)))
+      
+      dataset_augmented <- dataset_concatenate(dataset_augmented,augmentation)
+      
+      #augmentation 3: flip left right AND up down, 
+      #including random change of saturation, brightness and contrast
+      
+      augmentation <- 
+        dataset_map(dataset, function(.x) 
+          list_modify(.x, img = spectral_augmentation(.x$img)))
+      
+      augmentation <- 
+        dataset_map(augmentation, function(.x) 
+          list_modify(.x, img = tf$image$flip_left_right(.x$img),
+                          mask = tf$image$flip_left_right(.x$mask)))
+      
+      augmentation <- 
+        dataset_map(augmentation, function(.x) 
+          list_modify(.x, img = tf$image$flip_up_down(.x$img),
+                          mask = tf$image$flip_up_down(.x$mask)))
+      
+      dataset_augmented <- dataset_concatenate(dataset_augmented,augmentation)
+      
+    }
+    
+    # shuffling on training set only
+    if (train) {
+      dataset <- dataset_shuffle(dataset_augmented, buffer_size = batch_size*128)
+    }
+    
+    # train in batches; batch size might need to be adapted depending on
+    # available memory
+    dataset <- dataset_batch(dataset, batch_size)
+    
+    # output needs to be unnamed
+    dataset <-  dataset_map(dataset, unname) 
+    
+  }else{
+    #make sure subsets are read in in correct order 
+    #so that they can later be reassembled correctly
+    #needs files to be named accordingly (only number)
+    o <- order(as.numeric(tools::file_path_sans_ext(basename(list.files(subsets_path)))))
+    subset_list <- list.files(subsets_path, full.names = T)[o]
+    
+    dataset <- tensor_slices_dataset(subset_list)
+    
+    dataset <- 
+      dataset_map(dataset, function(.x) 
+        tf$image$decode_jpeg(tf$io$read_file(.x))) 
+    
+    dataset <- 
+      dataset_map(dataset, function(.x) 
+        tf$image$convert_image_dtype(.x, dtype = tf$float32)) 
+    
+    dataset <- 
+      dataset_map(dataset, function(.x) 
+        tf$image$resize(.x, size = shape(model_input_shape[1], model_input_shape[2]))) 
+    
+    dataset <- dataset_batch(dataset, batch_size)
+    dataset <-  dataset_map(dataset, unname)
+    
+  }
+  
+}
+
+
+```
+
+
+Let´s prepare the training data for our U-net using this function.
+We will first collect the file paths of images and masks. Then we apply our function to prepare the data for training.
+
+```{r prepare_data_unet}
+#get paths 
+files <- data.frame(
+  img = list.files("./training_unet/imgs/", full.names = TRUE, pattern = "*.jpg"),
+  mask = list.files("./training_unet/masks/", full.names = TRUE, pattern = "*.jpg")
+)
+
+# split the data into training and validation datasets. 
+
+files <- initial_split(files, prop = 0.8)
+
+# prepare data for training
+training_dataset <- dl_prepare_data(training(files),train = TRUE,model_input_shape = c(448,448),batch_size = 10L)
+validation_dataset <- dl_prepare_data(testing(files),train = FALSE,model_input_shape = c(448,448),batch_size = 10L)
+```
+
+
+
+We can again inspect the resulting data set through the python iterator:
+
+```{r inspect_augmented_data}
+# get all tensors through the python iterator
+training_tensors <- training_dataset%>%as_iterator()%>%iterate()
+
+#how many tensors?
+length(training_tensors)
+```
+
+```{r, echo=F,eval=F}
+#now what´s the shape of one tensor, here the image tensor (list item 1) of the first batch?
+training_tensors[[1]][[1]]$shape
+# and the mask
+training_tensors[[1]][[2]]$shape
+
+#how about the last batch?
+training_tensors[[8]][[1]]$shape
+training_tensors[[8]][[2]]$shape
+```
+Instead of 20 samples, we now have 80 (8 tensors, each with size 10 in the first dimension). 
+
+Fitting this model is done same way as above:
+```{r train_unet, eval=F}
+compile(
+  pretrained_unet,
+  optimizer = optimizer_rmsprop(lr = 1e-5),
+  loss = "binary_crossentropy",
+  metrics = c(metric_binary_accuracy)
+  )
+
+
+diagnostics <- fit(pretrained_unet,
+               training_dataset,
+               epochs = 15,
+               validation_data = validation_dataset)
+
+plot(diagnostics)+geom_smooth(method = "loess",se=F)
+
+```
+
+We won´t run the training this time. Instead, we load a U-net, that has been trained on a GPU using the code above.
+```{r}
+pretrained_unet <- load_model_hdf5("./pretrained_unet.h5")
+```
+
+
+Let´s use this model for prediction and compare the result to the mask on one of our validation samples:
+
+```{r}
+sample <- floor(runif(n = 1,min = 1,max = 4))
+  img_path <- as.character(testing(files)[[sample,1]])
+  mask_path <- as.character(testing(files)[[sample,2]])
+  img <- magick::image_read(img_path)
+  mask <- magick::image_read(mask_path)
+  pred <- magick::image_read(as.raster(predict(object = pretrained_unet,validation_dataset)[sample,,,]))
+  
+  out <- magick::image_append(c(
+  magick::image_append(mask, stack = TRUE),
+  magick::image_append(img, stack = TRUE), 
+  magick::image_append(pred, stack = TRUE)
+)
+)
+
+plot(out)
+```
+
+Predicting with this model works very similar to the workflow in part I. First, we will organize and read the data of our test area.  Again, we will for now assume the images and masks to be sitting on our disk already (folder: `\testarea_unet`). 
+We will use our function defined above, this time in `predict=TRUE`- mode.
+
+```{r}
+test_dataset <- dl_prepare_data(train = F,predict = T,subsets_path="./testarea_unet/subsets/",model_input_shape = c(448,448),batch_size = 5L)
+
+system.time(predictions <- predict(pretrained_unet,test_dataset))
+
+```
+
+
+
+
+
+
+## Final prediction result
+
+Let´s check the result on the map. We will again use the method for reassembling the subsets to the final map, which you will see later.
+
+```{r,echo=F,warning=F, message=F,results=F}
+input_img <- stack("./testarea_unet/testarea_crop.tif")
+rebuild_img(predictions,out_path = "./testarea_unet/",target_rst = input_img)
+
+result_map <- raster("./testarea_unet/out/mosaic.tif")%>%readAll()
+result_map[result_map[[1]]<0.5] <- NA
+
+``` 
+
+```{r,echo=F,warning=F, message=F,results=T,out.width="100%"}
+viewRGB(input_img,layer.name = "input image", quantiles = c(0,1),r=1,g=2,b=3)+mapview(result_map,layer.name="wildrye prediciton", alpha.regions=0.4,na.alpha=0)
+```
+
+
+## Inspecting your network
+
+
+A very important topic, of which we can only briefly scratch the surface, is how to analyze and understand your model, what it has learned, how it transforms the input images, and why it classifies images the way it does. This might be even more important when making use of pre-trained models.
+
+Here, we will only look at one example of how to get a better understanding of what is actually happening to the images in your model. If you want to continue working with Deep Learning, I recommend to look deeper into this field as well, e.g. by reading the chapter 5.4 of [@Chollet]
+
+So far, we have looked at the predictions made by our models. However, we can also look into the outputs of intermediate layers. By visualizing the activations of single layers of our trained model, we get an idea of what the model has learned during training. We can do this by using the functional API in keras.
+
+```{r visualizing_activations}
+
+plot_layer_activations <- function(img_path, model, activations_layers,channels){
+  
+ 
+  model_input_size <- c(model$input_shape[[2]], model$input_shape[[3]]) 
+  
+  #preprocess image for the model
+  img <- image_load(img_path, target_size =  model_input_size) %>%
+    image_to_array() %>%
+    array_reshape(dim = c(1, model_input_size[1], model_input_size[2], 3)) %>%
+    imagenet_preprocess_input()
+  
+  layer_outputs <- lapply(model$layers[activations_layers], function(layer) layer$output)
+  activation_model <- keras_model(inputs = model$input, outputs = layer_outputs)
+  activations <- predict(activation_model,img)
+  if(!is.list(activations)){
+    activations <- list(activations)
+  }
+  
+  #function for plotting one channel of a layer, adopted from: Chollet (2018): "Deep learning with R"
+  plot_channel <- function(channel,layer_name,channel_name) {
+    rotate <- function(x) t(apply(x, 2, rev))
+    image(rotate(channel), axes = FALSE, asp = 1,
+          col = terrain.colors(12),main=paste("layer:",layer_name,"channel:",channel_name))
+  }
+  
+  for (i in 1:length(activations)) {
+    layer_activation <- activations[[i]]
+    layer_name <- model$layers[[activations_layers[i]]]$name
+    n_features <- dim(layer_activation)[[4]]
+    for (c in channels){
+      
+      channel_image <- layer_activation[1,,,c]
+      plot_channel(channel_image,layer_name,c)
+      
+    }
+  } 
+  
+}
+
+```
+
+
+The following code visualizes and exemplary input image an uses the function above to plot the first 4 activations/responses of each convolutional layer in our U-net on that specific image:
+
+```{r}
+par(mfrow=c(1,1))
+plot(read_stars("./testarea_unet/subsets/25.jpg"),rgb=c(1,2,3))
+
+#visualize layers 3 and 10, channels 1 to 20
+par(mfrow=c(3,4),mar=c(1,1,1,1),cex=0.5)
+plot_layer_activations(img_path = "./testarea_unet/subsets/25.jpg", model=pretrained_unet ,activations_layers = c(2,3,5,6,8,9,10,12,13,14), channels = 1:4)
+```
+
+## From single images to maps
+
+We have now discussed all kinds of methods to analyze images using CNNs in Keras. All these functions expect rather small images (we have seen examples expecting sizes of 128x128 and 448x448 pixels). In remote sensing however, we are interested in making predictions on larger images and expect maps, not subsets of maps, as results. We need functions for splitting larger images into subsets before feeding them into a CNN and for reassembling the resulting predictions to a map (The following code chunks show rather naive solutions for both these steps. There are of course other, probably smarter ways to do that!).
+
+The first function below takes the input image (as raster) and a target subset size (vector of two numbers) as input. It then crops the input image to the next size that exactly fits a multiple of the desired subset size, so that all subsets are equally sized. Then the image is split into subsets and the subsets are written to disk (path targetdir). The files are enumerated and numbers included in the file names, so that they can be read in the correct order during prediction and can later be reassembled accordingly. The function also returns the cropped input raster so that it can be used as reference for reassembling prediction results (see below). 
+
+```{r, dl_subsets}
+
+dl_subsets <- function(inputrst, targetsize, targetdir, targetname="", img_info_only = FALSE, is_mask = FALSE){
+  require(jpeg)
+  require(raster)
+  
+  #determine next number of quadrats in x and y direction, by simple rounding
+  targetsizeX <- targetsize[1]
+  targetsizeY <- targetsize[2]
+  inputX <- ncol(inputrst)
+  inputY <- nrow(inputrst)
+  
+  #determine dimensions of raster so that 
+  #it can be split by whole number of subsets (by shrinking it)
+  while(inputX%%targetsizeX!=0){
+    inputX = inputX-1  
+  }
+  while(inputY%%targetsizeY!=0){
+    inputY = inputY-1    
+  }
+  
+  #determine difference
+  diffX <- ncol(inputrst)-inputX
+  diffY <- nrow(inputrst)-inputY
+  
+  #determine new dimensions of raster and crop, 
+  #cutting evenly on all sides if possible
+  newXmin <- floor(diffX/2)
+  newXmax <- ncol(inputrst)-ceiling(diffX/2)-1
+  newYmin <- floor(diffY/2)
+  newYmax <- nrow(inputrst)-ceiling(diffY/2)-1
+  rst_cropped <- suppressMessages(crop(inputrst, extent(inputrst,newYmin,newYmax,newXmin,newXmax)))
+  #writeRaster(rst_cropped,filename = target_dir_crop)
+  
+    #return (list(ssizeX = ssizeX, ssizeY = ssizeY, nsx = nsx, nsy =nsy))
+    agg <- suppressMessages(aggregate(rst_cropped[[1]],c(targetsizeX,targetsizeY)))
+    agg[]    <- suppressMessages(1:ncell(agg))
+    agg_poly <- suppressMessages(rasterToPolygons(agg))
+    names(agg_poly) <- "polis"
+    
+    pb <- txtProgressBar(min = 0, max = ncell(agg), style = 3)
+    for(i in 1:ncell(agg)) {
+      
+      # rasterOptions(tmpdir=tmpdir)
+      setTxtProgressBar(pb, i)
+      e1  <- extent(agg_poly[agg_poly$polis==i,])
+      
+      subs <- suppressMessages(crop(rst_cropped,e1))
+      #rescale to 0-1, for jpeg export
+      if(is_mask==FALSE){
+        
+        subs <- suppressMessages((subs-cellStats(subs,"min"))/(cellStats(subs,"max")-cellStats(subs,"min")))
+      } 
+      #write jpg
+      
+     
+      writeJPEG(as.array(subs),target = paste0(targetdir,targetname,i,".jpg"),quality = 1)
+      
+      #writeRaster(subs,filename=paste0(targetdir,"SplitRas_",i,".tif"),overwrite=TRUE) 
+      #return(c(extent(rst_cropped),crs(rst_cropped)))
+    }
+    close(pb)
+    #img_info <- list("tiles_rows"=nrow(rst_cropped)/targetsizeY, "tiles_cols"=ncol(rst_cropped)/targetsizeX,"crs"= crs(rst_cropped),"extent"=extent(rst_cropped))
+    #writeRaster(rst_cropped,filename = paste0(targetdir,"input_rst_cropped.tif"))
+    rm(subs,agg,agg_poly)
+    gc()
+    return(rst_cropped)
+  
+}
+
+
+```
+
+
+The following function reassembles prediction subsets to a map. It assumes that the image has been splitted using our function above and needs the cropped raster for reference. This is the function we used in part I to visualize the predictions of our first model. It takes prediction subsets, the desired output path, and the cropped reference raster as input.
+
+```{r rebuild_img}
+
+rebuild_img <- function(pred_subsets,out_path,target_rst){
+  require(raster)
+  require(gdalUtils)
+  require(stars)
+  
+  
+  subset_pixels_x <- ncol(pred_subsets[1,,,])
+  subset_pixels_y <- nrow(pred_subsets[1,,,])
+  tiles_rows <- nrow(target_rst)/subset_pixels_y
+  tiles_cols <- ncol(target_rst)/subset_pixels_x
+  
+  # load target image to determine dimensions
+   target_stars <- st_as_stars(target_rst,proxy=F)
+   #prepare subfolder for output
+   result_folder <- paste0(out_path,"out")
+   if(dir.exists(result_folder)){
+     unlink(result_folder,recursive = T)
+   }
+   dir.create(path = result_folder)
+   
+  #for each tile, create a stars from corresponding predictions, 
+  #assign dimensions using original/target image, and save as tif: 
+  for (crow in 1:tiles_rows){
+    for (ccol in 1:tiles_cols){
+      i <- (crow-1)*tiles_cols + (ccol-1) +1 
+      
+      dimx <- c(((ccol-1)*subset_pixels_x+1),(ccol*subset_pixels_x))
+      dimy <- c(((crow-1)*subset_pixels_y+1),(crow*subset_pixels_y))
+      cstars <- st_as_stars(t(pred_subsets[i,,,1]))
+      attr(cstars,"dimensions")[[2]]$delta=-1
+      #set dimensions using original raster
+      st_dimensions(cstars) <- st_dimensions(target_stars[,dimx[1]:dimx[2],dimy[1]:dimy[2]])[1:2]
+     
+      write_stars(cstars,dsn = paste0(result_folder,"/_out_",i,".tif")) 
+    }
+  }
+  
+  starstiles <- as.vector(list.files(result_folder,full.names = T),mode = "character")
+  gdalbuildvrt(starstiles,paste0(result_folder,"/mosaic.vrt"))
+  gdalwarp(paste0(result_folder,"/mosaic.vrt"), paste0(result_folder,"/mosaic.tif"))
+}
+
+```
+
+
+
+
+# Exercises
+
+1. Using the code chunks shown in this tutorial, try to apply the pretrained U-net to predict on another testarea, which you can find in folder `/testarea_exercise`:
+
+a) Inspect the image: What do you think will happen when using our model here.
+b) Turn the image into subsets (use the function dl_subsets, save the cropped raster it returns to a variable for later)
+c) Prepare the subsets such that they can be processed by the model (you can use the function dl_prepare_data)
+d) Make the prediction using `pretrained_unet`.
+e) Reassemble the predictions back to one image/map
+f) Visualize the result and inspect the prediction: Does the outcome match your assumption made in a) ?
+
+2. Use the dataset, that you prepared for exercise 1. Make a prediction again, but this time using the model `pretrained_unet2`, which is in the `tutorial_data` folder. Compare the results.
+
+3. Bonus Question: The figure below shows the sketch of the original U-net, as proposed by [@Ronneberger2015]. Compare it to the model we used in the tutorial. Besides the fact that we are using pretrained layers for the contracting path, what is the other major difference in the architecture? 
+
+
+
+# Side Notes
+
+
+## Model instances {#modelinstances}
+
+Please note, that we do not have to assign the results of adding layers, e.g., `layer_conv_2d` back to `first_model` via `first_model <- ... `, because models in Keras are modified in-place:
+
+```{r, in-place}
+
+
+model <- keras_model_sequential()
+layer_conv_2d(model,filters = 64,kernel_size = 3, padding = "same", activation = "relu",input_shape = c(128,128,3)) 
+# <-- this gives the same result:
+
+model <- keras_model_sequential()
+model <- layer_conv_2d(model,filters = 64,kernel_size = 3, padding = "same", activation = "relu",input_shape = c(128,128,3))
+
+summary(model)
+```
+
+Keep in mind, that if you assign a model to a new variable, you don´t get a new model object. Instead you still work with the same model, only that now two variables are pointing to it. So don´t be surprised when you find the following:
+```{r}
+#create an empty model
+original_model <- keras_model_sequential()
+#add layer
+layer_conv_2d(original_model,filters = 64,kernel_size = 3, padding = "same", activation = "relu",input_shape = c(128,128,3)) 
+summary(original_model)
+
+#"save" network to another variable
+backup_model <- original_model
+
+#add another layer to original_model
+original_model <- layer_conv_2d(original_model,filters = 64,kernel_size = 3, padding = "same", activation = "relu",input_shape = c(128,128,3))
+
+summary(original_model)
+
+#this has also changed backup_model: 
+summary(backup_model)
+```
+
+If we wanted to really copy the model, we could use `clone_model()`:
+```{r}
+#create an empty model
+original_model <- keras_model_sequential()
+layer_conv_2d(original_model,filters = 64,kernel_size = 3, padding = "same", activation = "relu",input_shape = c(128,128,3)) 
+
+#copy network and assign copy to another variable
+backup_model <- clone_model(original_model)
+
+#add another layer to original_model
+original_model <- layer_conv_2d(original_model,filters = 64,kernel_size = 3, padding = "same", activation = "relu",input_shape = c(128,128,3))
+
+summary(original_model)
+summary(backup_model)
+```
+
+This creates a copy of the actual model, which does not get modified, when the original is modified. Note: `clone_model()` only clones the model structure, not the parameters. If you want to copy a trained network including what it has learned, you also have to transfer the parameters:
+
+```{r}
+# copy network
+backup_model <- clone_model(original_model)
+# transfer weights from original to copy
+set_weights(backup_model,weights = get_weights(original_model) ) 
+```
+
+
+## Padding {#padding}
+
+As we have seen above, a convolutional filter slides a window over the input image to produce the output as a weighted sum of the pixels within that window. Given a certain size of this sliding window (`kernel_size`), not all pixels in the input image are also valid locations for the output: for pixels at the edges of images, no convolution can be applied because there are no neighboring pixels on all sides. Thus, the output resulting from a convolution will be a bit smaller than the input (containing only the pixels on which the sliding window can be centered). If we want to keep the same size in the output as in the input, we can set the argument `padding` to `same` (default is `valid`). This means that during the convolution an appropriate number of pixels (with value 0) is added on each side such that the sliding window can also be centered on the edge pixels and the size of the output is the same as of the input. 
+
+
+## Actication functions {#activation_functions}
+
+
+### Step activation function
+
+This activation function is a simple threshold, any number below the threshold is mapped to 0, any number above that threshold is mapped to 1. 
+
+```{r step}
+input <- seq(-8,8,0.001)
+step_output <-lapply(input, FUN=function(x){
+  if(x>=0){return(1)}
+  else{return(0)}
+})
+plot(input,step_output, type="l", col="blue", ylab="step(input)",main="step activation function")
+abline(v=0,lty=3,lwd=2, col="grey")
+```
+
+
+
+### Sigmoid activation function
+The sigmoid activation function is defined as:$$sig(input)= 1/1+e^{-input}$$
+
+It basically "squeezes" all information into the value range from 0 to 1.
+
+```{r sigmoid}
+input <- seq(-8,8,0.001)
+sig_output <- 1/(1+exp(-input))
+plot(input,sig_output, type="l", col="blue", ylab="sig(input)",main="sigmoid activation function")
+abline(v=0,lty=3,lwd=2, col="grey")
+```
+
+Sigmoid activation functions are well suitable for the last layers of networks producing the final output in binary classification tasks. In our example above, the final dense layer uses a sigmoid activation function and returns a value between 0 and 1, which can be interpreted as the probability for the input image to contain the target.
+
+Sigmoid activation functions can also be used in hidden layers. However, their property of squeezing all the information to values between 0 and 1 can accelerate the vanishing gradient problem -especially in longer chains of layers- (see [side note on vanishing gradient and dying reLu](#vanishing_gradient)), which is why in CNNs they have mainly been replaced by other activation functions, such as reLU.
+
+
+### reLU activation function (rectified linear unit)
+
+The reLU function is also a very simple function: $$reLu(input)= max(0,input)$$
+Each input number is mapped to the maximum of 0 and that number (i.e. all negative numbers are 0ed out, the remainder is left unchanged).
+
+
+```{r relu}
+input <- seq(-8,8,0.001)
+relu_output <-lapply(input, FUN=function(x)max(0,x))
+plot(input,relu_output, type="l", col="blue", ylab="reLU(input)",main="reLU activation function")
+abline(v=0,lty=3,lwd=2, col="grey")
+```
+
+reLU has had pretty big success and effect in reducing the vanishing gradient problembut this activation function also comes with possible issues (see [side note on vanishing gradient and dying reLu](#vanishing_gradient)), and there are a number of extensions and other activation functions available (leaky reLU, elu,...). Still, reLU works very well in practice and is one of the most commonly used activation functions for hidden layers in CNNs.
+
+
+
+## Vanishing gradient {#vanishing_gradient}
+
+Using many layers and applying activation functions like sigmoid leads to the problem that the first layers of the network learn (i.e. adapt their parameters) very slowly or stop learning. Why is that? 
+The training of a neural network works through the backpropagation algorithm:
+
+Broadly speaking, for adapting the weights and biases during training we need to know the gradient (derivative) of the loss (error) of the network with respect to all these parameters, or in other words: the derivative of the function mapping the parameter values to the loss values. Knowing this, we iteratively change the weights and biases in the opposite direction of the gradient, such that the loss becomes smaller and smaller. Since the network consists of multiple layers (i.e. multiple transformation functions) chained together, the backpropagation algorithm computes this gradient by using the chain rule, starting with the last layer and then working backwards through the network.
+This means that the derivatives of the transformation functions in all the layers are multiplied. The derivative of a sigmoid function however, is often a very small number (near 0 for large negative or positive inputs). When chaining multiple layers with sigmoid activations together, multiple small numbers are multiplied during backpropagation leading to a gradient that becomes smaller and smaller with every layer. Since this gradient is used for adapting the parameters proportionally, this will lead to parameters of the "early" layers being updated very slowly, i.e. they stop learning. This problem is called the vanishing gradient problem. 
+
+One way to overcome this problem is to use activation functions that do not "squeeze" the input information into the range between 0 and 1. One very popular example is the rectified linear unit (reLU). However, using this activation function can lead to other, similar problems: for values <0 the activation and the gradient will also 0. The neuron will output 0 and will not change during training. This problem is called the dying reLU problem. It can be avoided by using different activation functions, such as leaky reLU or elu.
+ReLU however, works well in practice and is therefore still used in many applications. 
+ 
+ 
+## Optimizers and the SGD {#optimizers}
+
+As mentioned in the [section on training your model](#train), the training of CNNs works through iteratively adapting its parameters such that the loss is minimized. This adaption works through stochastic gradient descent, i.e. the gradient (derivative) of the function mapping parameter values to loss values is determined for the current batch of data, and the parameters are changed a little bit in the opposite direction of the gradient (we go down the slope of the loss surface). This method can have issues, e.g. with local minima of the loss surface or because different learning rates are needed for different parameters at different iterations. Multiple variants of the SGD are available to deal with possible issues, e.g., adapting the learning rate for single parameters, or using the concept of "momentum" to overcome local minima.
+For a nice explanation, see, e.g., [@Chollet2018] chapter 2.4.3
+`rmsprob` is one variant of SGD, that (broadly speaking) adapts the learning rate for a parameter by using a moving average of the magnitudes of recent gradients of for that parameter.
+
+
+
+## Value normalization {#value_normalization}
+
+If the values fed into a neural network are much larger than the initial values of the parameters, or if data is very heterogeneous (different features have very different value ranges), this can prevent the network from converging. To facilitate the learning, values should be small and homogenous, thus typically one rescales them to 0-1 or even normalizes them (centering around 0). 
+
+
+## Binary Crossentropy {#binary_crossentropy}
+
+The binary crossentropy is a popular loss function for binary classification problems. It is defined as:
+
+$$BCE(q) = 1/n \sum_{i=1}^n -y_i\cdot\log(p(y_i))-(1-y_i)\cdot\log(1-p(y_i))$$
+where $y$ is the label ("ground truth/reference"), i.e. 0 or 1, $p(y)$ is the probability value assigned by the model (prediction result) and $N$ is the number of observations.
+If you unpack this, it is actually pretty simple. It adds $-log(probability)$ as loss value for all observations with label =1 , and $-log(1-probability)$ for all observations with label = 0. So if for example the (predicted) probability of an observation with label 1 is very low (e.g. 0.001), we´ll get a high loss value ($-log(0.001) \approx 6.91$). If the probability for an observation with label 0 is very low, the loss value will be very low as well ($-log(1-0.001) \approx 0.001$). The function then takes the average of the loss values over all observations (in one batch $q$).
+
+You can check the loss calculation of the formula above for a single value with this simple code:
+
+```{r binary crossentropy}
+
+bc <- function(y_pred,y_true){
+  
+  return(-y_true*log(y_pred)-(1-y_true)*log(1-y_pred))
+}
+
+bc(0.9,1)
+bc(0.1,1)
+bc(0.8,0)
+bc(0.2,0)
+```
+
+There are of course other loss functions available, but crossentropy is often a good choice when working with probabilities as outputs[@Chollet2018}.
+
+
+## Layer parameters {#layer_parameters}
+
+Let´s have a look at our first model again.
+```{r}
+summary(first_model)
+```
+If you consider the concept of the different layers mentioned in the section on [building a network](#build_network) you can  reproduce the number of parameters of layers as shown in this summary: Take a look at the first of the two dense layers in our network: it processes an input of 4608 values in 256 units, meaning that it transforms the input into 256 outputs. For each output it computes a weighted sum and adds a bias. This means that it needs 4608 times 256 parameters for the weights of the weighted sums plus 256 biases, which is in total $4608\times256+256=1179904$.
+The second dense layer in our network then computes one weighted sum (it has only one unit) of the 256 outputs resulting from the previous dense layer and adds one bias, thus it has 257 parameters. The result is then a number that is put into a sigmoid activation function resulting in a number between 0 and 1 (target vs. non-target). 
+Let´s now look at the very first convolutional layer: It processes an input of 3 bands/channels (the height and width are not important since we use a sliding kernel and produce local weighted sums). On these inputs it applies 32 kernels of the size 3 by 3. This means that this layer has $3\times3\times3\times32 + 32 =896$ parameters to learn, 864 for the kernels and 32 for the biases.
+
+
+## Python iterators {#iterators}
+
+A tf_dataset as created by `tensor_slices_dataset()` is -under the hood- a Python iterable. It can be turned into an iterator using the `reticulate` function `as_iterator()`. This iterator can then be traversed by `iter_next()`. The function `iterate()` traverses the whole dataset, and in this case returns a list of all its elements.
+
+```{r, inspect_dataset_element}
+training_dataset <- tensor_slices_dataset(training(data))
+#look at the next element of the dataset
+training_dataset%>%as_iterator()%>%iter_next()
+
+#it is a list of two tensors
+class(training_dataset%>%as_iterator()%>%iter_next())
+
+#the first tensor is the image path
+(training_dataset%>%as_iterator()%>%iter_next())[[1]]
+
+#the second tensor is the label
+(training_dataset%>%as_iterator()%>%iter_next())[[2]]
+
+#if you want to get a list of all tensors, you can use the iterate() function
+dataset_iterator <- as_iterator(training_dataset)
+dataset_list <- iterate(dataset_iterator)
+#check the first few items of that list, each one is again a list with two items: img and lbl
+head(dataset_list)
+
+#check tensor containing path of 12th image
+dataset_list[[12]][[1]]
+#...and the corresponding label
+dataset_list[[12]][[2]]
+
+```
+
+## Keras functional API {#functional_API}
+
+In the functional API, you work with layers as if they were functions transforming your tensor. So you are not actually adapting a model in each step but the output tensor of that model. This is also why we have to reassign results to the variable, because the in-place-modification does not apply to tensors.
+At the end you retrieve an output tensor, that has been transformed multiple times. Feeding this tensor as `outputs` and the `input_tensor` as `inputs` into the function `keras_model()` will create the model including all intermediate layers. This works, because keras automatically retrieves all transformations involved in getting from the input tensor to the output tensor (i.e. the `layer_...()`  functions we applied to the tensor). 
+
+
+## Transfer learning {#transfer_learning}
+
+Transfer learning by using pre-trained networks might be specifically appealing for many of use cases in the field of (UAV-based) high-resolution remote sensing: on the one hand, the objects we are typically looking for are not very complex (compared to recognizing faces or similar tasks), they might quickly benefit even from rather generic feature detectors. On the other hand, we are often confronted with small data problems. Here, using partly pre-trained models can be of great help to successfully train on small amounts of training data. 
+
+## Transposed convolution {#transp_conv}
+
+Explaining in detail transposed convolution goes beyond the scope of this tutorial. A detailed explanation can be found, e.g., [here](https://arxiv.org/pdf/1603.07285v1.pdf).
+For the sake of this tutorial, try to think of transposed convolution as a way for "learnable upsampling", where the parameters for the upsampling are not hardcoded, but learned during the training.
+
+
+# References
+
