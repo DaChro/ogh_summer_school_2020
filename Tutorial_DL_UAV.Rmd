@@ -513,7 +513,7 @@ We now have two `tf_dataset` objects containing our training and validation data
 
 
 
-## Training your model/network {#train}
+## Training your model {#train}
 
 
 The first step is to configure/prepare the model for training. We do this using the `compile()` function on our model.
@@ -573,7 +573,7 @@ diagnostics <- fit(first_model,
                epochs = 15,
                validation_data = validation_dataset)
 
-plot(diagnostics)+geom_smooth(method = "loess",se=F)
+plot(diagnostics)
 ```
 
 Here we defined three arguments: the training and validation datasets that we have just created, and the number of epochs, i.e. how often the network will iterate over all training data: When all data has been processed batch by batch following the workflow mentioned above, one `epoch` is finished. This whole process will be repeated for as many times as specified by the argument `epochs`.
@@ -787,7 +787,7 @@ diagnostics <- fit(pretrained_model,
                training_dataset,
                epochs = 6,
                validation_data = validation_dataset)
-plot(diagnostics)+geom_smooth(method = "loess",se=F)
+plot(diagnostics)
 ```
 
 We can see, that now the training curve flattens at a high accuracy already after ~3-5 epochs.
@@ -1191,7 +1191,7 @@ training_tensors[[8]][[2]]$shape
 Instead of 20 samples, we now have 80 (8 tensors, each with size 10 in the first dimension). 
 
 Fitting this model is done same way as above:
-```{r train_unet, eval=F}
+```{r train_unet, eval=T}
 compile(
   pretrained_unet,
   optimizer = optimizer_rmsprop(lr = 1e-5),
@@ -1205,7 +1205,7 @@ diagnostics <- fit(pretrained_unet,
                epochs = 15,
                validation_data = validation_dataset)
 
-plot(diagnostics)+geom_smooth(method = "loess",se=F)
+plot(diagnostics)
 
 ```
 
