@@ -38,7 +38,7 @@ library(reticulate)
 library(mapview)
 
 
-#If not done already, download and unzip the tutorial data:
+#If not done yet, download and unzip the tutorial data:
 
 #download.file("https://uni-muenster.sciebo.de/s/45044pj8yvQsdOJ/download",destfile = "tutorial_data.zip")
 #unzip("./tutorial_data.zip")
@@ -82,7 +82,7 @@ This scenario presents a typical ecological monitoring task. Applications like t
 In this tutorial we will work on a very simple and very small example.
 This is what our data looks like. The test area, in which we will detect the extent of wildrye to test our model, is located in western part of the Hallig The training data was collected in two small training areas in the north of the Hallig (not the whole of the images are used for training, only a few subsets).
 
-```{r test_area,echo=F,warning=F,message=F,eval=T}
+```{r test_area,echo=F,warning=F,message=F,eval=T,out.width="100%"}
 input_img <- stack("./testarea_part1/testarea.tif")
 training1 <- stack("./training_part1/quecken_img_1.tif")
 training2 <- stack("./training_part1/quecken_img_3.tif")
