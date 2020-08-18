@@ -38,6 +38,7 @@ library(reticulate)
 library(mapview)
 
 
+
 #If not done yet, download and unzip the tutorial data:
 
 #download.file("https://uni-muenster.sciebo.de/s/SOjP7fRGBRztn9z/download",destfile = "tutorial_data.zip")
