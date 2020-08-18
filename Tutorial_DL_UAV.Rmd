@@ -16,6 +16,7 @@ editor_options:
   chunk_output_type: console
 bibliography: references.bib
 link-citations: yes
+nocite: '@*'
 ---
 
 ```{r setup, include=FALSE}
@@ -36,7 +37,6 @@ library(stars)
 library(raster)
 library(reticulate)
 library(mapview)
-
 
 
 #If not done yet, download and unzip the tutorial data:
@@ -1712,5 +1712,5 @@ Explaining in detail transposed convolution goes beyond the scope of this tutori
 For the sake of this tutorial, try to think of transposed convolution as a way for "learnable upsampling", where the parameters for the upsampling are not hardcoded, but learned during the training.
 
 
-# References
+# References and Further Reading
 
