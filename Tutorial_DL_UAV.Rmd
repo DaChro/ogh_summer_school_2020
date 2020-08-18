@@ -40,7 +40,7 @@ library(mapview)
 
 #If not done yet, download and unzip the tutorial data:
 
-#download.file("https://uni-muenster.sciebo.de/s/45044pj8yvQsdOJ/download",destfile = "tutorial_data.zip")
+#download.file("https://uni-muenster.sciebo.de/s/SOjP7fRGBRztn9z/download",destfile = "tutorial_data.zip")
 #unzip("./tutorial_data.zip")
 #setwd("./tutorial_data/")
 
