@@ -1,6 +1,6 @@
 ---
 title: "Introduction to Deep Learning in R for the Analysis of UAV-based Remote Sensing Data"
-author: "OpenGeoHub summer school 2020"
+author: "OpenGeoHub summer school 2020, Christian Knoth"
 date: "*Aug 17, 2020*"
 output: 
   html_document:
@@ -99,6 +99,7 @@ As we have seen in the plenary, our models consist of a number of layers consecu
  
 ```{r,echo=F}
 magick::image_draw(magick::image_read("./figures/CNN-sketch.png"))
+dev.off()
 ```
  
 In this part of the tutorial, the model we´re going to build will do image classification. 
@@ -175,6 +176,7 @@ What convolutional layers do is essentially not much different from what you pro
 
 ```{r,echo=F,out.width="60%",fig.align="center"}
 magick::image_draw(magick::image_read("./figures/conv_sketch.png"))
+dev.off()
 ```
 
 One of the specifics of convolutional neural networks is that the weights of the filters are not predefined by the analyst (by choosing a specific filter), but instead learned by the network during training. You only specify the properties of the filters such as the kernel size, 'sliding speed', or the behavior at image borders. With each convolutional layer you add multiple filters (equivalent to the `units` of dense layers). The first convolutional layer of our example has 64 filters. Such a layer transforms the image from 3 dimensions (the RGB bands) to 64 dimensions, so the output called _feature map_ has 64 different bands. Each band represents a response that was extracted from the image with one of the filters. The more convolutional layers are stacked up, the more complex and abstract the extracted features become.
@@ -245,6 +247,7 @@ A maxpooling layer is used for downsampling input data to a coarser resolution. 
 
 ```{r,echo=F,out.width="60%", fig.align="center"}
 magick::image_draw(magick::image_read("./figures/maxpool_sketch.png"))
+dev.off()
 ```
 
 
@@ -305,6 +308,7 @@ The following figure shows a sketch of the architecture. The arrows indicate the
 
 ```{r,out.width="100%",echo=F}
 magick::image_draw(magick::image_read("./figures/first_model.png"))
+dev.off()
 ```
 
 
@@ -549,6 +553,7 @@ This workflow is called _(mini-batch) stochastic gradient descent_ (mini-batch S
 
 ```{r,echo=F,out.width="80%",fig.align="center"}
 magick::image_draw(magick::image_read("./figures/training_workflow.png"))
+dev.off()
 ```
 
 
@@ -829,6 +834,7 @@ The typical architecture is shown in the figure below. It as a sketch of a large
 
 ```{r,echo=F, fig.align="center"}
 magick::image_draw(magick::image_read("./figures/unet_small.png"))
+dev.off()
 ```
 
 
@@ -1192,7 +1198,7 @@ training_tensors[[8]][[2]]$shape
 Instead of 20 samples, we now have 80 (8 tensors, each with size 10 in the first dimension). 
 
 Fitting this model is done same way as above:
-```{r train_unet, eval=F}
+```{r train_unet, eval=T}
 compile(
   pretrained_unet,
   optimizer = optimizer_rmsprop(lr = 1e-5),
