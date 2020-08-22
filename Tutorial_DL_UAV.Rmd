@@ -99,6 +99,9 @@ As we have seen in the plenary, our models consist of a number of layers consecu
  
 ```{r,echo=F}
 magick::image_draw(magick::image_read("./figures/CNN-sketch.png"))
+```
+
+```{r,echo=F,results=F}
 dev.off()
 ```
  
@@ -176,6 +179,8 @@ What convolutional layers do is essentially not much different from what you pro
 
 ```{r,echo=F,out.width="60%",fig.align="center"}
 magick::image_draw(magick::image_read("./figures/conv_sketch.png"))
+```
+```{r,echo=F,results=F}
 dev.off()
 ```
 
@@ -247,6 +252,8 @@ A maxpooling layer is used for downsampling input data to a coarser resolution. 
 
 ```{r,echo=F,out.width="60%", fig.align="center"}
 magick::image_draw(magick::image_read("./figures/maxpool_sketch.png"))
+```
+```{r,echo=F,results=F}
 dev.off()
 ```
 
@@ -308,6 +315,8 @@ The following figure shows a sketch of the architecture. The arrows indicate the
 
 ```{r,out.width="100%",echo=F}
 magick::image_draw(magick::image_read("./figures/first_model.png"))
+```
+```{r,echo=F,results=F}
 dev.off()
 ```
 
@@ -553,6 +562,8 @@ This workflow is called _(mini-batch) stochastic gradient descent_ (mini-batch S
 
 ```{r,echo=F,out.width="80%",fig.align="center"}
 magick::image_draw(magick::image_read("./figures/training_workflow.png"))
+```
+```{r,echo=F,results=F}
 dev.off()
 ```
 
@@ -834,9 +845,12 @@ The typical architecture is shown in the figure below. It as a sketch of a large
 
 ```{r,echo=F, fig.align="center"}
 magick::image_draw(magick::image_read("./figures/unet_small.png"))
-dev.off()
+
 ```
 
+```{r,echo=F,results=F}
+dev.off()
+```
 
 The idea is the following: The network starts with a sequence of convolutional and maxpooling layers. As we have seen before, this sequence extracts features and spatial patterns of growing complexity (with growing number of convolutional/maxpooling blocks). This part is also called the _contracting path_  of the network. The extraction of ever more complex and abstract features happens 'at the cost' of downsampling the resolution, thus loosing information about where exactly certain features are.
 
