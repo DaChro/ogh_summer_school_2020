@@ -1211,7 +1211,7 @@ training_tensors[[8]][[2]]$shape
 ```
 Instead of 20 samples, we now have 80 (8 tensors, each with size 10 in the first dimension). 
 
-Fitting this model is done same way as above:
+Fitting this model is done the same way as above (do not run this code now):
 ```{r train_unet, eval=T}
 compile(
   pretrained_unet,
@@ -1229,6 +1229,7 @@ diagnostics <- fit(pretrained_unet,
 plot(diagnostics)
 
 ```
+
 
 We won´t run the training this time. Instead, we load a U-net, that has been trained on a GPU using the code above.
 ```{r}
