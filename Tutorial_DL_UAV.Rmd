@@ -1212,7 +1212,7 @@ training_tensors[[8]][[2]]$shape
 Instead of 20 samples, we now have 80 (8 tensors, each with size 10 in the first dimension). 
 
 Fitting this model is done the same way as above (do not run this code now):
-```{r train_unet, eval=T}
+```{r train_unet, eval=F}
 compile(
   pretrained_unet,
   optimizer = optimizer_rmsprop(lr = 1e-5),
