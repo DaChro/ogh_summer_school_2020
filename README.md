@@ -14,7 +14,7 @@ https://dachro.github.io/ogh_summer_school_2020/Tutorial_DL_UAV.html
 
 Install a current version of R and the following packages:
 
-`install.packages(c("keras","tfdatasets","mapview","stars","rsample","gdalUtils","purrr", "magick", "jpeg","rgdal"))`
+`install.packages(c("keras","tfdatasets","mapview","stars","rsample","gdalUtils","purrr", "magick", "jpeg"))`
 
 Install miniconda, keras and tensorflow python dependencies:
 
