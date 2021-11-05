@@ -14,7 +14,7 @@ The tutorial notebook showing all the code and explanations can be found here:
 
 # Installation
 
-To reproduce the tutorial, certain packages and other dependencies are required (if you don´t want to install everything yourself, you might want to use the Docker image, see below). 
+To reproduce the tutorial, certain R packages and other dependencies are required (if you don´t want to install everything yourself, you might want to use the Docker image, see below). 
 
 Install a current version of R and the following packages:
 
