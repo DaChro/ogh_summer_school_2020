@@ -7,10 +7,14 @@
 
 # Tutorial Notebook
 
-The tutorial html can be found here:
-https://dachro.github.io/ogh_summer_school_2020/Tutorial_DL_UAV.html
+The tutorial notebook showing the code with explanations can be found here:
+
+- [HTML](https://dachro.github.io/ogh_summer_school_2020/Tutorial_DL_UAV.html)
+- [R Markdown] (https://github.com/DaChro/ogh_summer_school_2020/blob/master/Tutorial_DL_UAV.Rmd)
 
 # Installation
+
+To reproduce the tutorial, certain packages and other dependencies are required (if you don´t want to install everything yourself, you might want to use the Docker image, see below). 
 
 Install a current version of R and the following packages:
 
