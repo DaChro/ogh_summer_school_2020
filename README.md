@@ -7,7 +7,7 @@
 
 # Tutorial Notebook
 
-The tutorial notebook showing all the code and explanations can be found here:
+The tutorial notebook with all the code and explanations can be found here:
 
 - [HTML](https://dachro.github.io/ogh_summer_school_2020/Tutorial_DL_UAV.html)
 - [R Markdown source](https://github.com/DaChro/ogh_summer_school_2020/blob/master/Tutorial_DL_UAV.Rmd)
