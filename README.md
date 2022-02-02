@@ -46,7 +46,7 @@ When running any tensorflow-related code for the first time, you will probably g
 
 # Docker
 
-If you are in for using Docker, I´ve prepared a Docker image that includes all software and data for the tutorial, so you can reproduce the tutorial without installing keras etc. on your host system. If you want to use it, download and install Docker Engine:
+If you are in for using Docker, I´ve prepared a Docker image that includes all software and data for the tutorial, so you can reproduce the tutorial without installing keras etc. on your host system. If you want to use it, download and install Docker Engine/Desktop:
 
 - Linux: https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
 - Windows: https://docs.docker.com/docker-for-windows/install/
